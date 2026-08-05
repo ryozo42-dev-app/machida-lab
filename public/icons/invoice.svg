@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>請求書</title>
+  <path d="M16 10h24l12 12v30a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4V14a4 4 0 0 1 4-4z" fill="#FF4C96"/>
+  <path d="M40 10v12h12" fill="#FF9AC2"/>
+  <rect x="20" y="28" width="24" height="3" rx="1.5" fill="#FFD6E8"/>
+  <rect x="20" y="35" width="20" height="3" rx="1.5" fill="#FFD6E8"/>
+  <rect x="20" y="42" width="16" height="3" rx="1.5" fill="#FFD6E8"/>
+</svg>
