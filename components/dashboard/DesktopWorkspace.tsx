@@ -55,7 +55,7 @@ export default function DesktopWorkspace() {
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-3 sm:px-6 sm:pb-6">
       <div className="flex min-h-0 flex-[3] items-center justify-center">
-        <ModalDisplayArea />
+        <ModalDisplayArea activeId={activeId} />
       </div>
 
       <div className="flex flex-[1] items-end justify-center overflow-visible pt-3 sm:pt-4">
