@@ -7,6 +7,7 @@ export type DockItem = {
   iconSrc?: string;
   iconAlt?: string;
   label?: string;
+  indicatorColor?: string;
 };
 
 type DockLauncherProps = {
@@ -44,7 +45,7 @@ export default function DockLauncher({ items, activeId, onSelect }: DockLauncher
 
   return (
     <nav
-      className="w-full max-w-[900px] overflow-visible rounded-[24px] border border-[#ECECEC] bg-white px-5 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.06)]"
+      className="w-full max-w-[1020px] overflow-visible rounded-[24px] border border-[#ECECEC] bg-white px-5 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.06)]"
       aria-label="機能ランチャー"
     >
       <div className="overflow-visible">
@@ -94,6 +95,14 @@ export default function DockLauncher({ items, activeId, onSelect }: DockLauncher
                 >
                   {item.label}
                 </span>
+
+                <span
+                  className={`pointer-events-none absolute -bottom-0.5 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full transition-opacity duration-200 ${
+                    isSelected ? "opacity-100" : "opacity-0"
+                  }`}
+                  style={{ backgroundColor: item.indicatorColor ?? "#F5A200" }}
+                  aria-hidden="true"
+                />
               </li>
             );
           })}

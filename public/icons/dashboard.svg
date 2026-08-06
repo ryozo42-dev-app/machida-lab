@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>ダッシュボード</title>
+  <rect x="12" y="12" width="40" height="40" rx="10" fill="#5C73F2"/>
+  <rect x="19" y="19" width="11" height="11" rx="2.5" fill="#DDE4FF"/>
+  <rect x="34" y="19" width="11" height="11" rx="2.5" fill="#DDE4FF"/>
+  <rect x="19" y="34" width="11" height="11" rx="2.5" fill="#DDE4FF"/>
+  <rect x="34" y="34" width="11" height="11" rx="2.5" fill="#DDE4FF"/>
+</svg>
