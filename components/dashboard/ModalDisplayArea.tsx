@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type ModalDisplayAreaProps = {
   activeId: string;
@@ -66,6 +66,18 @@ const permanentRight = ["8", "7", "6", "5", "4", "3", "2", "1"];
 const permanentLeft = ["1", "2", "3", "4", "5", "6", "7", "8"];
 const deciduousRight = ["E", "D", "C", "B", "A"];
 const deciduousLeft = ["A", "B", "C", "D", "E"];
+
+type WorkRecord = {
+  id: string;
+  orderNo: string;
+  clinic: string;
+  patient: string;
+  workType: string;
+  deliveryDate: string;
+  tooth: string;
+  memo: string;
+  completed: boolean;
+};
 
 function DashboardModal() {
   const handleCardClick = (card: DashboardCard) => {
@@ -464,14 +476,19 @@ function OrderEntryModal() {
                 </button>
 
                 {pdfPreviewUrl ? (
-                  <div className="mt-1 flex w-full items-center justify-center gap-3 rounded-lg border border-[#E8E8E8] bg-white p-2">
+                  <button
+                    type="button"
+                    onClick={() => window.open(pdfPreviewUrl, "_blank", "noopener,noreferrer")}
+                    className="mt-1 flex w-full items-center justify-center gap-3 rounded-lg border border-[#E8E8E8] bg-white p-2 text-left transition-colors duration-200 ease-[ease] hover:bg-[#FFF8EA]"
+                    aria-label="アップロードしたPDFを拡大表示"
+                  >
                     <iframe
                       title="PDFサムネイル"
                       src={`${pdfPreviewUrl}#toolbar=0&navpanes=0&scrollbar=0&page=1&view=FitH`}
                       className="h-20 w-16 rounded border border-[#E2E2E2]"
                     />
                     <p className="max-w-[260px] truncate text-xs text-[#666666]">{pdfName}</p>
-                  </div>
+                  </button>
                 ) : null}
               </div>
             </div>
@@ -510,9 +527,236 @@ function OrderEntryModal() {
   );
 }
 
+function WorkInputModal() {
+  const [records, setRecords] = useState<WorkRecord[]>([
+    {
+      id: "w-001",
+      orderNo: "ORD-20260807-001",
+      clinic: "町田歯科医院",
+      patient: "山田 太郎",
+      workType: "クラウン",
+      deliveryDate: "2026/08/07",
+      tooth: "上顎 右 6",
+      memo: "咬合面の調整を優先。色調A2指定。",
+      completed: false,
+    },
+    {
+      id: "w-002",
+      orderNo: "ORD-20260807-002",
+      clinic: "町田歯科医院",
+      patient: "鈴木 花子",
+      workType: "インレー",
+      deliveryDate: "2026/08/07",
+      tooth: "下顎 左 5",
+      memo: "適合確認後に研磨。",
+      completed: false,
+    },
+    {
+      id: "w-003",
+      orderNo: "ORD-20260807-003",
+      clinic: "中央デンタルクリニック",
+      patient: "田中 一郎",
+      workType: "前装冠",
+      deliveryDate: "2026/08/08",
+      tooth: "上顎 左 1",
+      memo: "形態は既存歯に合わせる。",
+      completed: false,
+    },
+  ]);
+  const [selectedId, setSelectedId] = useState("w-001");
+
+  const dummyPdfUrl = useMemo(() => {
+    const pdfSource = `%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n4 0 obj\n<< /Length 65 >>\nstream\nBT\n/F1 18 Tf\n24 120 Td\n(Work Instruction PDF) Tj\nET\nendstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\nxref\n0 6\n0000000000 65535 f \n0000000010 00000 n \n0000000061 00000 n \n0000000118 00000 n \n0000000274 00000 n \n0000000390 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n460\n%%EOF`;
+    const blob = new Blob([pdfSource], { type: "application/pdf" });
+    return URL.createObjectURL(blob);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      URL.revokeObjectURL(dummyPdfUrl);
+    };
+  }, [dummyPdfUrl]);
+
+  const selectedRecord = records.find((record) => record.id === selectedId) ?? records[0];
+
+  const groupedRecords = records.reduce<Record<string, WorkRecord[]>>((acc, record) => {
+    if (!acc[record.clinic]) {
+      acc[record.clinic] = [];
+    }
+    acc[record.clinic].push(record);
+    return acc;
+  }, {});
+
+  const handleFinish = () => {
+    setRecords((prev) =>
+      prev.map((record) =>
+        record.id === selectedId ? { ...record, completed: true } : record
+      )
+    );
+    console.log(`[Work] finish clicked: ${selectedId}`);
+  };
+
+  const handleCancel = () => {
+    setRecords((prev) =>
+      prev.map((record) =>
+        record.id === selectedId && record.completed
+          ? { ...record, completed: false }
+          : record
+      )
+    );
+    console.log(`[Work] revert to in-progress: ${selectedId}`);
+  };
+
+  return (
+    <section
+      className="flex h-full min-h-[340px] w-full max-w-6xl flex-col rounded-[20px] border border-[#E6E6E6] bg-white p-6 shadow-[0_16px_40px_rgba(15,23,42,0.10)]"
+      aria-label="作業時入力"
+    >
+      <div className="flex items-start gap-3">
+        <span className="mt-1 h-10 w-[5px] rounded-full bg-[#F5A200]" aria-hidden="true" />
+        <div>
+          <h2 className="text-2xl font-bold text-[#222222]">作業時入力</h2>
+          <p className="mt-1 text-xs text-[#666666]">本日の作業を管理します</p>
+        </div>
+      </div>
+
+      <div className="mt-4 flex min-h-0 flex-1 flex-col gap-4">
+        <div className="flex min-h-0 flex-[3] rounded-[16px] border border-[#E8E8E8] bg-white p-3 pb-4 shadow-[0_6px_18px_rgba(15,23,42,0.08)]">
+          {selectedRecord ? (
+            <div className="flex w-full flex-col justify-between">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                <p><span className="font-semibold text-[#555555]">受注No:</span> <span className="text-[#222222]">{selectedRecord.orderNo}</span></p>
+                <p><span className="font-semibold text-[#555555]">歯科医院:</span> <span className="text-[#222222]">{selectedRecord.clinic}</span></p>
+                <p><span className="font-semibold text-[#555555]">患者名:</span> <span className="text-[#222222]">{selectedRecord.patient}</span></p>
+                <p><span className="font-semibold text-[#555555]">作業内容:</span> <span className="text-[#222222]">{selectedRecord.workType}</span></p>
+                <p><span className="font-semibold text-[#555555]">納品予定日:</span> <span className="text-[#222222]">{selectedRecord.deliveryDate}</span></p>
+                <p><span className="font-semibold text-[#555555]">歯番:</span> <span className="text-[#222222]">{selectedRecord.tooth}</span></p>
+              </div>
+
+              <div className="mt-2 grid grid-cols-[110px_1fr] gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (dummyPdfUrl) {
+                      window.open(dummyPdfUrl, "_blank", "noopener,noreferrer");
+                    } else {
+                      console.log("[Work] PDF preview not ready");
+                    }
+                  }}
+                  className="rounded-lg border border-[#E2E2E2] bg-[#FCFCFC] p-1 transition-colors duration-200 ease-[ease] hover:bg-[#FFF8EA]"
+                  aria-label="指示書PDFを表示"
+                >
+                  {dummyPdfUrl ? (
+                    <iframe
+                      title="作業指示書サムネイル"
+                      src={`${dummyPdfUrl}#toolbar=0&navpanes=0&scrollbar=0&page=1&view=FitH`}
+                      className="h-20 w-full rounded border border-[#E2E2E2]"
+                    />
+                  ) : (
+                    <div className="flex h-20 items-center justify-center text-xs text-[#888888]">PDF</div>
+                  )}
+                </button>
+
+                <div>
+                  <p className="text-xs font-semibold text-[#555555]">作業メモ</p>
+                  <p className="mt-1 rounded-lg border border-[#EFEFEF] bg-[#FCFCFC] px-3 py-1.5 text-sm text-[#333333]">
+                    {selectedRecord.memo}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  disabled={!selectedRecord?.completed}
+                  className="rounded-lg border border-[#E1E1E1] bg-white px-5 py-2 text-sm font-semibold text-[#444444] transition-colors duration-200 ease-[ease] hover:bg-[#F8F8F8] disabled:cursor-not-allowed disabled:bg-[#F6F6F6] disabled:text-[#A5A5A5]"
+                >
+                  作業中に戻す
+                </button>
+                <button
+                  type="button"
+                  onClick={handleFinish}
+                  className="rounded-lg bg-[#F5A200] px-5 py-2 text-sm font-bold text-white shadow-[0_8px_18px_rgba(245,162,0,0.35)] transition-colors duration-200 ease-[ease] hover:bg-[#E09700]"
+                >
+                  作業終了
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex min-h-0 flex-[2] rounded-[16px] border border-[#E8E8E8] bg-white p-4 shadow-[0_4px_12px_rgba(15,23,42,0.06)]">
+          <div className="w-full">
+            <p className="text-sm font-semibold text-[#333333]">本日の作業一覧</p>
+
+            <div className="mt-3 space-y-3 text-sm">
+              {Object.entries(groupedRecords).map(([clinicName, clinicRecords]) => (
+                <div key={clinicName} className="rounded-lg border border-[#EEEEEE] bg-[#FCFCFC]">
+                  <div className="border-b border-[#ECECEC] px-3 py-2 text-xs font-bold text-[#555555]">
+                    【{clinicName}】
+                  </div>
+
+                  <div>
+                    {clinicRecords.map((record) => {
+                      const isSelected = record.id === selectedId;
+                      return (
+                        <button
+                          key={record.id}
+                          type="button"
+                          onClick={() => setSelectedId(record.id)}
+                          className={`grid w-full grid-cols-[1fr_1fr_1fr_auto] items-center gap-3 border-b border-[#EFEFEF] px-3 py-2 text-left last:border-b-0 transition-colors duration-150 ease-[ease] ${
+                            isSelected ? "bg-[#FFF8EA]" : "bg-transparent hover:bg-[#FFFDF7]"
+                          } ${record.completed ? "text-[#9AA0AA]" : "text-[#2A2A2A]"}`}
+                        >
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            {record.completed ? (
+                              <svg
+                                viewBox="0 0 24 24"
+                                className="h-4 w-4 shrink-0 text-[#7E8591]"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                aria-hidden="true"
+                              >
+                                <circle cx="12" cy="12" r="9" />
+                                <path d="m8.5 12 2.3 2.3 4.7-4.8" />
+                              </svg>
+                            ) : null}
+                            <span className="truncate">{record.patient}</span>
+                          </span>
+                          <span className="truncate">{record.workType}</span>
+                          <span className="truncate">{record.deliveryDate}</span>
+                          {record.completed ? (
+                            <span className="inline-flex items-center text-xs font-semibold text-[#7E8591]">
+                              完了
+                            </span>
+                          ) : (
+                            <span className="text-xs text-[#666666]">作業中</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function ModalDisplayArea({ activeId }: ModalDisplayAreaProps) {
   if (activeId === "order") {
     return <OrderEntryModal />;
+  }
+
+  if (activeId === "work") {
+    return <WorkInputModal />;
   }
 
   return <DashboardModal />;
