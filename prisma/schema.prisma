@@ -1,0 +1,132 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model customer_insurance_prices {
+  id                Int       @id @default(autoincrement())
+  customer_id       Int
+  insurance_item_id Int
+  price             Decimal   @db.Decimal(10, 2)
+  created_at        DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model customer_private_prices {
+  id              Int       @id @default(autoincrement())
+  customer_id     Int
+  private_item_id Int
+  price           Decimal   @db.Decimal(10, 2)
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model customers {
+  id         Int       @id @default(autoincrement())
+  code       String    @unique @db.VarChar(20)
+  name       String    @db.VarChar(100)
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model deliveries {
+  id            Int       @id @default(autoincrement())
+  delivery_no   String?   @db.VarChar(50)
+  customer_id   Int
+  delivery_date DateTime  @db.Date
+  total_amount  Decimal?  @db.Decimal(12, 2)
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model insurance_items {
+  id         Int       @id @default(autoincrement())
+  category   String    @db.VarChar(100)
+  item_name  String    @db.VarChar(200)
+  material   String?   @db.VarChar(100)
+  points     Decimal?  @db.Decimal(10, 2)
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  sub_type   String?   @db.VarChar(200)
+}
+
+model invoices {
+  id           Int       @id @default(autoincrement())
+  invoice_no   String?   @db.VarChar(50)
+  customer_id  Int
+  closing_date DateTime? @db.Date
+  invoice_date DateTime? @db.Date
+  subtotal     Decimal?  @db.Decimal(12, 2)
+  tax_rate     Decimal?  @db.Decimal(5, 2)
+  tax_amount   Decimal?  @db.Decimal(12, 2)
+  total_amount Decimal?  @db.Decimal(12, 2)
+  paid         Boolean?  @default(false)
+  created_at   DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model order_files {
+  id         Int       @id @default(autoincrement())
+  order_id   Int
+  file_name  String?   @db.VarChar(255)
+  file_path  String?
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model order_items {
+  id                Int       @id @default(autoincrement())
+  order_id          Int
+  insurance_item_id Int?
+  private_item_id   Int?
+  quantity          Int?      @default(1)
+  unit_price        Decimal?  @db.Decimal(10, 2)
+  created_at        DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model order_teeth {
+  id         Int       @id @default(autoincrement())
+  order_id   Int
+  tooth_no   String    @db.VarChar(10)
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model orders {
+  id             Int       @id @default(autoincrement())
+  order_no       String?   @db.VarChar(50)
+  customer_id    Int
+  patient_id     Int
+  order_date     DateTime  @db.Date
+  delivery_date  DateTime? @db.Date
+  insurance_type String?   @db.VarChar(20)
+  remarks        String?
+  billed         Boolean?  @default(false)
+  created_at     DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model patients {
+  id           Int       @id @default(autoincrement())
+  customer_id  Int
+  patient_name String    @db.VarChar(100)
+  patient_kana String?   @db.VarChar(100)
+  gender       String?   @db.VarChar(10)
+  birthday     DateTime? @db.Date
+  memo         String?
+  created_at   DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model private_items {
+  id             Int       @id @default(autoincrement())
+  category       String    @db.VarChar(100)
+  item_name      String    @db.VarChar(200)
+  material       String?   @db.VarChar(100)
+  standard_price Decimal?  @db.Decimal(10, 2)
+  created_at     DateTime? @default(now()) @db.Timestamp(6)
+  sub_type       String?   @db.VarChar(200)
+}
+
+model users {
+  id            Int       @id @default(autoincrement())
+  login_id      String?   @unique @db.VarChar(100)
+  user_name     String?   @db.VarChar(100)
+  password_hash String?
+  role          String?   @db.VarChar(20)
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+}
