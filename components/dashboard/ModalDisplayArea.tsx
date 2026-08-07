@@ -86,10 +86,12 @@ function DashboardModal() {
 
   return (
     <section
-      className="flex h-full min-h-[340px] w-full max-w-6xl flex-col rounded-[20px] border border-[#E6E6E6] bg-white p-7 shadow-[0_16px_40px_rgba(15,23,42,0.10)] sm:p-9"
+      className="flex h-full min-h-[340px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-7 sm:p-9"
       aria-label="ダッシュボード"
     >
-      <div className="flex items-start justify-between gap-4">
+      <div className="h-[14px] w-full rounded-t-[20px] bg-[#F5A200]" aria-hidden="true" />
+
+      <div className="mt-3 flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">
           <span className="mt-1 h-10 w-[5px] rounded-full bg-[#F5A200]" aria-hidden="true" />
           <div>
@@ -117,7 +119,7 @@ function DashboardModal() {
             key={card.id}
             type="button"
             onClick={() => handleCardClick(card)}
-            className="relative flex min-h-[120px] items-center justify-between overflow-hidden rounded-[16px] border border-[#E8E8E8] bg-white px-6 py-5 text-left shadow-[0_6px_18px_rgba(15,23,42,0.08)] transition-[transform,box-shadow] duration-200 ease-[ease] hover:-translate-y-0.5 hover:shadow-[0_12px_26px_rgba(15,23,42,0.14)]"
+            className="relative flex min-h-[120px] items-center justify-between overflow-hidden rounded-[16px] border border-[#E8E8E8] bg-white px-6 py-5 text-left transition-colors duration-200 ease-[ease]"
           >
             <span className={`absolute left-0 top-0 h-1 w-full ${card.accentClassName}`} aria-hidden="true" />
 
@@ -182,7 +184,7 @@ function ToothRow({
                 key={id}
                 type="button"
                 onClick={() => onToggle(id)}
-                className={`h-6 w-6 shrink-0 rounded-md border p-0 text-[10px] font-semibold transition-[transform,box-shadow,background-color,border-color] duration-200 ease-[ease] hover:-translate-y-0.5 hover:shadow-[0_4px_8px_rgba(0,0,0,0.10)] ${
+                className={`h-6 w-6 shrink-0 rounded-md border p-0 text-[10px] font-semibold transition-[background-color,border-color] duration-200 ease-[ease] ${
                   isSelected
                     ? "border-[#F5A200] bg-[#FFF4DE] text-[#A96E00]"
                     : "border-[#E5E5E5] bg-white text-[#444444]"
@@ -206,7 +208,7 @@ function ToothRow({
                 key={id}
                 type="button"
                 onClick={() => onToggle(id)}
-                className={`h-6 w-6 shrink-0 rounded-md border p-0 text-[10px] font-semibold transition-[transform,box-shadow,background-color,border-color] duration-200 ease-[ease] hover:-translate-y-0.5 hover:shadow-[0_4px_8px_rgba(0,0,0,0.10)] ${
+                className={`h-6 w-6 shrink-0 rounded-md border p-0 text-[10px] font-semibold transition-[background-color,border-color] duration-200 ease-[ease] ${
                   isSelected
                     ? "border-[#F5A200] bg-[#FFF4DE] text-[#A96E00]"
                     : "border-[#E5E5E5] bg-white text-[#444444]"
@@ -285,15 +287,50 @@ function OrderEntryModal() {
     handleFile(file);
   };
 
+  const submitOrder = async () => {
+    console.log("submit!!");
+    alert("submit!!");
+
+    const payload = {
+      customer_id: 1,
+      patient_id: 1,
+      order_date: new Date().toISOString(),
+      delivery_date: deliveryDate || new Date().toISOString(),
+      insurance_type: "保険",
+      remarks: note,
+    };
+
+    try {
+      const response = await fetch("/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error("Order registration failed");
+      }
+
+      alert("受注登録しました！");
+    } catch (error) {
+      console.error(error);
+      alert("登録に失敗しました");
+    }
+  };
+
   const teethRight = toothType === "permanent" ? permanentRight : deciduousRight;
   const teethLeft = toothType === "permanent" ? permanentLeft : deciduousLeft;
 
   return (
     <section
-      className="flex h-full min-h-[340px] w-full max-w-6xl flex-col rounded-[20px] border border-[#E6E6E6] bg-white p-6 shadow-[0_16px_40px_rgba(15,23,42,0.10)]"
+      className="flex h-full min-h-[340px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6"
       aria-label="受注入力"
     >
-      <div className="flex items-start gap-3">
+      <div className="h-[14px] w-full rounded-t-[20px] bg-[#F5A200]" aria-hidden="true" />
+
+      <div className="mt-3 flex items-start gap-3">
         <span className="mt-1 h-10 w-[5px] rounded-full bg-[#F5A200]" aria-hidden="true" />
         <div>
           <h2 className="text-2xl font-bold text-[#222222]">受注入力</h2>
@@ -303,9 +340,11 @@ function OrderEntryModal() {
 
       <form
         className="mt-4 flex min-h-0 flex-1 flex-col"
+        action="/orders"
+        method="post"
         onSubmit={(event) => {
           event.preventDefault();
-          console.log("[Order] register clicked");
+          void submitOrder();
         }}
       >
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
@@ -313,6 +352,7 @@ function OrderEntryModal() {
             <label className="text-xs font-semibold text-[#333333]">歯科医院</label>
             <div className="flex gap-2">
               <select
+                name="clinic"
                 value={clinic}
                 onChange={(event) => setClinic(event.target.value)}
                 className="h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
@@ -340,6 +380,7 @@ function OrderEntryModal() {
             <div className="flex gap-2">
               <div className="relative w-full">
                 <input
+                  name="patient_name"
                   value={patientQuery}
                   onChange={(event) => setPatientQuery(event.target.value)}
                   placeholder="患者名を入力して検索"
@@ -347,7 +388,7 @@ function OrderEntryModal() {
                 />
 
                 {patientQuery && filteredPatients.length > 0 ? (
-                  <div className="absolute z-30 mt-1 w-full rounded-xl border border-[#ECECEC] bg-white p-1 shadow-[0_10px_24px_rgba(0,0,0,0.10)]">
+                  <div className="absolute z-30 mt-1 w-full rounded-xl border border-[#ECECEC] bg-white p-1">
                     {filteredPatients.map((name) => (
                       <button
                         key={name}
@@ -376,6 +417,7 @@ function OrderEntryModal() {
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-[#333333]">作業内容</label>
             <select
+              name="work_type"
               value={workType}
               onChange={(event) => setWorkType(event.target.value)}
               className="h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
@@ -392,13 +434,14 @@ function OrderEntryModal() {
             <label className="text-xs font-semibold text-[#333333]">納品予定日</label>
             <input
               type="date"
+              name="delivery_date"
               value={deliveryDate}
               onChange={(event) => setDeliveryDate(event.target.value)}
               className="h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
             />
           </div>
 
-          <div className="col-span-1 space-y-2 rounded-[14px] border border-[#E7E7E7] bg-white p-3 shadow-[0_3px_8px_rgba(15,23,42,0.06)]">
+          <div className="col-span-1 space-y-2 rounded-[14px] border border-[#E7E7E7] bg-white p-3">
             <label className="text-xs font-semibold text-[#333333]">歯番</label>
 
             <div className="flex gap-4">
@@ -506,6 +549,9 @@ function OrderEntryModal() {
           </div>
 
           <div className="col-span-2 flex items-center justify-end gap-2 pt-1">
+            <input type="hidden" name="customer_id" value="1" />
+            <input type="hidden" name="patient_id" value="1" />
+            <input type="hidden" name="insurance_type" value="保険" />
             <button
               type="button"
               onClick={() => console.log("[Order] cancel clicked")}
@@ -516,7 +562,7 @@ function OrderEntryModal() {
 
             <button
               type="submit"
-              className="rounded-lg bg-[#F5A200] px-6 py-2 text-sm font-bold text-white shadow-[0_8px_18px_rgba(245,162,0,0.35)] transition-colors duration-200 ease-[ease] hover:bg-[#E09700]"
+              className="rounded-lg bg-[#F5A200] px-6 py-2 text-sm font-bold text-white transition-colors duration-200 ease-[ease] hover:bg-[#E09700]"
             >
               受注登録
             </button>
@@ -609,10 +655,12 @@ function WorkInputModal() {
 
   return (
     <section
-      className="flex h-full min-h-[340px] w-full max-w-6xl flex-col rounded-[20px] border border-[#E6E6E6] bg-white p-6 shadow-[0_16px_40px_rgba(15,23,42,0.10)]"
+      className="flex h-full min-h-[340px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6"
       aria-label="作業時入力"
     >
-      <div className="flex items-start gap-3">
+      <div className="h-[14px] w-full rounded-t-[20px] bg-[#F5A200]" aria-hidden="true" />
+
+      <div className="mt-3 flex items-start gap-3">
         <span className="mt-1 h-10 w-[5px] rounded-full bg-[#F5A200]" aria-hidden="true" />
         <div>
           <h2 className="text-2xl font-bold text-[#222222]">作業時入力</h2>
@@ -621,7 +669,7 @@ function WorkInputModal() {
       </div>
 
       <div className="mt-4 flex min-h-0 flex-1 flex-col gap-4">
-        <div className="flex min-h-0 flex-[3] rounded-[16px] border border-[#E8E8E8] bg-white p-3 pb-4 shadow-[0_6px_18px_rgba(15,23,42,0.08)]">
+        <div className="flex min-h-0 flex-[3] rounded-[16px] border border-[#E8E8E8] bg-white p-3 pb-4">
           {selectedRecord ? (
             <div className="flex w-full flex-col justify-between">
               <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
@@ -677,7 +725,7 @@ function WorkInputModal() {
                 <button
                   type="button"
                   onClick={handleFinish}
-                  className="rounded-lg bg-[#F5A200] px-5 py-2 text-sm font-bold text-white shadow-[0_8px_18px_rgba(245,162,0,0.35)] transition-colors duration-200 ease-[ease] hover:bg-[#E09700]"
+                  className="rounded-lg bg-[#F5A200] px-5 py-2 text-sm font-bold text-white transition-colors duration-200 ease-[ease] hover:bg-[#E09700]"
                 >
                   作業終了
                 </button>
@@ -686,7 +734,7 @@ function WorkInputModal() {
           ) : null}
         </div>
 
-        <div className="flex min-h-0 flex-[2] rounded-[16px] border border-[#E8E8E8] bg-white p-4 shadow-[0_4px_12px_rgba(15,23,42,0.06)]">
+        <div className="flex min-h-0 flex-[2] rounded-[16px] border border-[#E8E8E8] bg-white p-4">
           <div className="w-full">
             <p className="text-sm font-semibold text-[#333333]">本日の作業一覧</p>
 

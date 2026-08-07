@@ -58,7 +58,7 @@ export default function DesktopWorkspace() {
         <ModalDisplayArea activeId={activeId} />
       </div>
 
-      <div className="flex flex-[1] items-end justify-center overflow-visible pt-3 sm:pt-4">
+      <div className="flex justify-center pt-3 sm:pt-4">
         <DockLauncher
           items={dockItems}
           activeId={activeId}
