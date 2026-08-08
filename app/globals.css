@@ -26,6 +26,10 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+button:not(:disabled) {
+  cursor: pointer;
+}
+
 .material-symbols-outlined {
   font-family: "Material Symbols Outlined";
   font-weight: normal;

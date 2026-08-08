@@ -51,7 +51,6 @@ const dashboardCards: DashboardCard[] = [
   },
 ];
 
-const clinicOptions = ["町田歯科医院", "中央デンタルクリニック", "みなみ歯科"];
 const workTypeOptions = ["クラウン", "インレー", "義歯", "矯正装置"];
 const patientCandidates = [
   "山田 太郎",
@@ -62,6 +61,12 @@ const patientCandidates = [
 ];
 
 type ToothSetType = "permanent" | "deciduous";
+type CustomerOption = {
+  id: number;
+  code: string;
+  name: string;
+};
+
 const permanentRight = ["8", "7", "6", "5", "4", "3", "2", "1"];
 const permanentLeft = ["1", "2", "3", "4", "5", "6", "7", "8"];
 const deciduousRight = ["E", "D", "C", "B", "A"];
@@ -169,9 +174,9 @@ function ToothRow({
   onToggle: (toothId: string) => void;
 }) {
   return (
-    <div>
-      <p className="text-xs font-semibold text-[#444444]">{jawLabel}</p>
-      <div className="mt-2 grid grid-cols-[12px_1fr_8px_1fr_12px] items-center gap-1">
+    <div className="flex items-center gap-2">
+      <p className="w-6 shrink-0 text-xs font-semibold text-[#444444]">{jawLabel}</p>
+      <div className="grid flex-1 grid-cols-[12px_1fr_8px_1fr_12px] items-center gap-1">
         <span className="text-[10px] font-medium text-[#666666]">右</span>
 
         <div className="flex flex-nowrap gap-0.5">
@@ -227,7 +232,10 @@ function ToothRow({
 }
 
 function OrderEntryModal() {
-  const [clinic, setClinic] = useState(clinicOptions[0]);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  const [customerId, setCustomerId] = useState<number | null>(null);
+  const [isCustomersLoading, setIsCustomersLoading] = useState(true);
+  const [customersError, setCustomersError] = useState("");
   const [patientQuery, setPatientQuery] = useState("");
   const [workType, setWorkType] = useState(workTypeOptions[0]);
   const [deliveryDate, setDeliveryDate] = useState("");
@@ -242,6 +250,47 @@ function OrderEntryModal() {
   const filteredPatients = patientCandidates.filter((name) =>
     name.toLowerCase().includes(patientQuery.toLowerCase())
   );
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadCustomers = async () => {
+      try {
+        const response = await fetch("/api/customers", {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch customers");
+        }
+
+        const data: CustomerOption[] = await response.json();
+
+        if (data.length === 0) {
+          setCustomersError("歯科医院が登録されていません");
+          return;
+        }
+
+        setCustomers(data);
+        setCustomerId(data[0].id);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        console.error(error);
+        setCustomersError("歯科医院の取得に失敗しました");
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsCustomersLoading(false);
+        }
+      }
+    };
+
+    void loadCustomers();
+
+    return () => controller.abort();
+  }, []);
 
   const toggleTooth = (toothId: string) => {
     setSelectedTeeth((prev) => {
@@ -288,11 +337,16 @@ function OrderEntryModal() {
   };
 
   const submitOrder = async () => {
+    if (customerId === null) {
+      alert("歯科医院を選択してください");
+      return;
+    }
+
     console.log("submit!!");
     alert("submit!!");
 
     const payload = {
-      customer_id: 1,
+      customer_id: customerId,
       patient_id: 1,
       order_date: new Date().toISOString(),
       delivery_date: deliveryDate || new Date().toISOString(),
@@ -325,7 +379,7 @@ function OrderEntryModal() {
 
   return (
     <section
-      className="flex h-full min-h-[340px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6"
+      className="flex h-full min-h-0 w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6"
       aria-label="受注入力"
     >
       <div className="h-[14px] w-full rounded-t-[20px] bg-[#F5A200]" aria-hidden="true" />
@@ -347,19 +401,31 @@ function OrderEntryModal() {
           void submitOrder();
         }}
       >
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+        <div className="min-h-0 flex-1">
+          <div className="grid h-full min-h-0 grid-cols-2 gap-4">
+            <div className="flex min-h-0 flex-col gap-3">
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-[#333333]">歯科医院</label>
             <div className="flex gap-2">
               <select
                 name="clinic"
-                value={clinic}
-                onChange={(event) => setClinic(event.target.value)}
-                className="h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
+                value={customerId ?? ""}
+                onChange={(event) => setCustomerId(Number(event.target.value))}
+                disabled={isCustomersLoading || Boolean(customersError)}
+                className={`h-10 w-full rounded-lg border bg-white px-3 text-sm font-medium outline-none transition-colors focus:border-[#F0B132] disabled:opacity-100 ${
+                  customersError
+                    ? "border-[#D75A4A] text-[#B42318]"
+                    : "border-[#E2E2E2] text-[#333333]"
+                }`}
               >
-                {clinicOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
+                {isCustomersLoading || customersError ? (
+                  <option value="">
+                    {isCustomersLoading ? "読み込み中..." : customersError}
+                  </option>
+                ) : null}
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name}
                   </option>
                 ))}
               </select>
@@ -375,6 +441,83 @@ function OrderEntryModal() {
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-[#333333]">作業内容</label>
+            <select
+              name="work_type"
+              value={workType}
+              onChange={(event) => setWorkType(event.target.value)}
+              className="h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
+            >
+              {workTypeOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-[#333333]">納品予定日</label>
+              <input
+                type="date"
+                name="delivery_date"
+                value={deliveryDate}
+                onChange={(event) => setDeliveryDate(event.target.value)}
+                className="h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
+              />
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-2 rounded-[14px] border border-[#E7E7E7] bg-white p-2">
+            <div className="flex items-center justify-between gap-4">
+              <label className="text-xs font-semibold text-[#333333]">歯番</label>
+              <div className="flex gap-4">
+              <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#444444]">
+                <input
+                  type="radio"
+                  name="toothType"
+                  checked={toothType === "permanent"}
+                  onChange={() => setToothType("permanent")}
+                  className="h-3.5 w-3.5 accent-[#F5A200]"
+                />
+                永久歯
+              </label>
+              <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#444444]">
+                <input
+                  type="radio"
+                  name="toothType"
+                  checked={toothType === "deciduous"}
+                  onChange={() => setToothType("deciduous")}
+                  className="h-3.5 w-3.5 accent-[#F5A200]"
+                />
+                乳歯
+              </label>
+              </div>
+            </div>
+
+            <div className="space-y-1.5 rounded-lg border border-[#EFEFEF] bg-[#FCFCFC] p-2">
+              <ToothRow
+                jawLabel="上顎"
+                rightTeeth={teethRight}
+                leftTeeth={teethLeft}
+                selectedTeeth={selectedTeeth}
+                onToggle={toggleTooth}
+              />
+              <div className="border-t border-[#E8E8E8]" />
+              <ToothRow
+                jawLabel="下顎"
+                rightTeeth={teethRight}
+                leftTeeth={teethLeft}
+                selectedTeeth={selectedTeeth}
+                onToggle={toggleTooth}
+              />
+            </div>
+          </div>
+            </div>
+
+            <div className="flex min-h-0 flex-col gap-3">
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-[#333333]">患者名</label>
             <div className="flex gap-2">
@@ -414,79 +557,7 @@ function OrderEntryModal() {
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-[#333333]">作業内容</label>
-            <select
-              name="work_type"
-              value={workType}
-              onChange={(event) => setWorkType(event.target.value)}
-              className="h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
-            >
-              {workTypeOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-[#333333]">納品予定日</label>
-            <input
-              type="date"
-              name="delivery_date"
-              value={deliveryDate}
-              onChange={(event) => setDeliveryDate(event.target.value)}
-              className="h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
-            />
-          </div>
-
-          <div className="col-span-1 space-y-2 rounded-[14px] border border-[#E7E7E7] bg-white p-3">
-            <label className="text-xs font-semibold text-[#333333]">歯番</label>
-
-            <div className="flex gap-4">
-              <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#444444]">
-                <input
-                  type="radio"
-                  name="toothType"
-                  checked={toothType === "permanent"}
-                  onChange={() => setToothType("permanent")}
-                  className="h-3.5 w-3.5 accent-[#F5A200]"
-                />
-                永久歯
-              </label>
-              <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#444444]">
-                <input
-                  type="radio"
-                  name="toothType"
-                  checked={toothType === "deciduous"}
-                  onChange={() => setToothType("deciduous")}
-                  className="h-3.5 w-3.5 accent-[#F5A200]"
-                />
-                乳歯
-              </label>
-            </div>
-
-            <div className="space-y-1.5 rounded-lg border border-[#EFEFEF] bg-[#FCFCFC] p-2.5">
-              <ToothRow
-                jawLabel="上顎"
-                rightTeeth={teethRight}
-                leftTeeth={teethLeft}
-                selectedTeeth={selectedTeeth}
-                onToggle={toggleTooth}
-              />
-              <div className="border-t border-[#E8E8E8]" />
-              <ToothRow
-                jawLabel="下顎"
-                rightTeeth={teethRight}
-                leftTeeth={teethLeft}
-                selectedTeeth={selectedTeeth}
-                onToggle={toggleTooth}
-              />
-            </div>
-          </div>
-
-          <div className="col-span-1 space-y-1.5">
+          <div className="flex min-h-0 flex-1 flex-col space-y-1.5">
             <label className="text-xs font-semibold text-[#333333]">指示書（PDF）</label>
             <div
               onDragOver={(event) => {
@@ -495,7 +566,7 @@ function OrderEntryModal() {
               }}
               onDragLeave={() => setIsDragActive(false)}
               onDrop={handleDrop}
-              className={`flex h-full min-h-[180px] items-center rounded-[12px] border-2 border-dashed p-3 transition-colors ${
+              className={`flex min-h-[76px] flex-1 items-center rounded-[12px] border-2 border-dashed p-2 transition-colors ${
                 isDragActive ? "border-[#F5A200] bg-[#FFF8EA]" : "border-[#E3E3E3] bg-[#FCFCFC]"
               }`}
             >
@@ -507,9 +578,8 @@ function OrderEntryModal() {
                 onChange={(event) => handleFile(event.target.files?.[0])}
               />
 
-              <div className="flex w-full flex-col items-center gap-3 text-center">
+              <div className="flex w-full items-center justify-center gap-3 text-center">
                 <p className="text-sm font-medium text-[#555555]">PDFをドラッグ＆ドロップ</p>
-                <p className="text-xs text-[#888888]">または</p>
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
@@ -537,36 +607,38 @@ function OrderEntryModal() {
             </div>
           </div>
 
-          <div className="space-y-1.5 col-span-2">
+          <div className="space-y-1.5">
             <label className="text-xs font-semibold text-[#333333]">備考</label>
             <textarea
               value={note}
               onChange={(event) => setNote(event.target.value)}
-              rows={3}
+              rows={2}
               className="w-full rounded-[12px] border border-[#E2E2E2] bg-white px-3 py-2 text-sm text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
               placeholder="備考を入力してください"
             />
           </div>
-
-          <div className="col-span-2 flex items-center justify-end gap-2 pt-1">
-            <input type="hidden" name="customer_id" value="1" />
-            <input type="hidden" name="patient_id" value="1" />
-            <input type="hidden" name="insurance_type" value="保険" />
-            <button
-              type="button"
-              onClick={() => console.log("[Order] cancel clicked")}
-              className="rounded-lg border border-[#E1E1E1] bg-white px-5 py-2 text-sm font-semibold text-[#444444] transition-colors duration-200 ease-[ease] hover:bg-[#F8F8F8]"
-            >
-              キャンセル
-            </button>
-
-            <button
-              type="submit"
-              className="rounded-lg bg-[#F5A200] px-6 py-2 text-sm font-bold text-white transition-colors duration-200 ease-[ease] hover:bg-[#E09700]"
-            >
-              受注登録
-            </button>
+            </div>
           </div>
+        </div>
+
+        <div className="mt-3 flex shrink-0 items-center justify-end gap-2 border-t border-[#ECECEC] bg-white pt-3">
+          <input type="hidden" name="customer_id" value={customerId ?? ""} />
+          <input type="hidden" name="patient_id" value="1" />
+          <input type="hidden" name="insurance_type" value="保険" />
+          <button
+            type="button"
+            onClick={() => console.log("[Order] cancel clicked")}
+            className="rounded-lg border border-[#E1E1E1] bg-white px-5 py-2 text-sm font-semibold text-[#444444] transition-colors duration-200 ease-[ease] hover:bg-[#F8F8F8]"
+          >
+            キャンセル
+          </button>
+
+          <button
+            type="submit"
+            className="rounded-lg bg-[#F5A200] px-6 py-2 text-sm font-bold text-white transition-colors duration-200 ease-[ease] hover:bg-[#E09700]"
+          >
+            受注登録
+          </button>
         </div>
       </form>
     </section>
