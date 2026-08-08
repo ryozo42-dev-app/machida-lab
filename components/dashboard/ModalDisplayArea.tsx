@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type ModalDisplayAreaProps = {
   activeId: string;
@@ -94,7 +94,7 @@ function toFdiToothNumber(toothId: string) {
 }
 
 type WorkRecord = {
-  id: string;
+  id: number;
   orderNo: string;
   clinic: string;
   patient: string;
@@ -102,7 +102,9 @@ type WorkRecord = {
   deliveryDate: string;
   tooth: string;
   memo: string;
+  workStatus: "pending" | "in_progress" | "completed";
   completed: boolean;
+  pdfUrl: string | null;
 };
 
 function DashboardModal() {
@@ -791,54 +793,40 @@ function OrderEntryModal() {
 }
 
 function WorkInputModal() {
-  const [records, setRecords] = useState<WorkRecord[]>([
-    {
-      id: "w-001",
-      orderNo: "ORD-20260807-001",
-      clinic: "町田歯科医院",
-      patient: "山田 太郎",
-      workType: "クラウン",
-      deliveryDate: "2026/08/07",
-      tooth: "上顎 右 6",
-      memo: "咬合面の調整を優先。色調A2指定。",
-      completed: false,
-    },
-    {
-      id: "w-002",
-      orderNo: "ORD-20260807-002",
-      clinic: "町田歯科医院",
-      patient: "鈴木 花子",
-      workType: "インレー",
-      deliveryDate: "2026/08/07",
-      tooth: "下顎 左 5",
-      memo: "適合確認後に研磨。",
-      completed: false,
-    },
-    {
-      id: "w-003",
-      orderNo: "ORD-20260807-003",
-      clinic: "中央デンタルクリニック",
-      patient: "田中 一郎",
-      workType: "前装冠",
-      deliveryDate: "2026/08/08",
-      tooth: "上顎 左 1",
-      memo: "形態は既存歯に合わせる。",
-      completed: false,
-    },
-  ]);
-  const [selectedId, setSelectedId] = useState("w-001");
-
-  const dummyPdfUrl = useMemo(() => {
-    const pdfSource = `%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n4 0 obj\n<< /Length 65 >>\nstream\nBT\n/F1 18 Tf\n24 120 Td\n(Work Instruction PDF) Tj\nET\nendstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\nxref\n0 6\n0000000000 65535 f \n0000000010 00000 n \n0000000061 00000 n \n0000000118 00000 n \n0000000274 00000 n \n0000000390 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n460\n%%EOF`;
-    const blob = new Blob([pdfSource], { type: "application/pdf" });
-    return URL.createObjectURL(blob);
-  }, []);
+  const [records, setRecords] = useState<WorkRecord[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
 
   useEffect(() => {
-    return () => {
-      URL.revokeObjectURL(dummyPdfUrl);
+    const controller = new AbortController();
+
+    const loadWorkRecords = async () => {
+      try {
+        const response = await fetch("/works", { signal: controller.signal });
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch work records");
+        }
+
+        const data: WorkRecord[] = await response.json();
+        setRecords(data);
+        setSelectedId((currentId) =>
+          currentId !== null && data.some((record) => record.id === currentId)
+            ? currentId
+            : data[0]?.id ?? null
+        );
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        console.error(error);
+      }
     };
-  }, [dummyPdfUrl]);
+
+    void loadWorkRecords();
+
+    return () => controller.abort();
+  }, []);
 
   const selectedRecord = records.find((record) => record.id === selectedId) ?? records[0];
 
@@ -850,24 +838,38 @@ function WorkInputModal() {
     return acc;
   }, {});
 
-  const handleFinish = () => {
-    setRecords((prev) =>
-      prev.map((record) =>
-        record.id === selectedId ? { ...record, completed: true } : record
-      )
-    );
-    console.log(`[Work] finish clicked: ${selectedId}`);
-  };
+  const updateWorkStatus = async (
+    workStatus: "in_progress" | "completed"
+  ) => {
+    if (selectedId === null) {
+      return;
+    }
 
-  const handleCancel = () => {
-    setRecords((prev) =>
-      prev.map((record) =>
-        record.id === selectedId && record.completed
-          ? { ...record, completed: false }
-          : record
-      )
-    );
-    console.log(`[Work] revert to in-progress: ${selectedId}`);
+    try {
+      const response = await fetch(`/works/${selectedId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ work_status: workStatus }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to update work status");
+      }
+
+      setRecords((currentRecords) =>
+        currentRecords.map((record) =>
+          record.id === selectedId
+            ? {
+                ...record,
+                workStatus,
+                completed: workStatus === "completed",
+              }
+            : record
+        )
+      );
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   return (
@@ -902,8 +904,8 @@ function WorkInputModal() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (dummyPdfUrl) {
-                      window.open(dummyPdfUrl, "_blank", "noopener,noreferrer");
+                    if (selectedRecord.pdfUrl) {
+                      window.open(selectedRecord.pdfUrl, "_blank", "noopener,noreferrer");
                     } else {
                       console.log("[Work] PDF preview not ready");
                     }
@@ -911,10 +913,10 @@ function WorkInputModal() {
                   className="rounded-lg border border-[#E2E2E2] bg-[#FCFCFC] p-1 transition-colors duration-200 ease-[ease] hover:bg-[#FFF8EA]"
                   aria-label="指示書PDFを表示"
                 >
-                  {dummyPdfUrl ? (
+                  {selectedRecord.pdfUrl ? (
                     <iframe
                       title="作業指示書サムネイル"
-                      src={`${dummyPdfUrl}#toolbar=0&navpanes=0&scrollbar=0&page=1&view=FitH`}
+                      src={`${selectedRecord.pdfUrl}#toolbar=0&navpanes=0&scrollbar=0&page=1&view=FitH`}
                       className="h-20 w-full rounded border border-[#E2E2E2]"
                     />
                   ) : (
@@ -933,7 +935,7 @@ function WorkInputModal() {
               <div className="mt-2 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={handleCancel}
+                  onClick={() => void updateWorkStatus("in_progress")}
                   disabled={!selectedRecord?.completed}
                   className="rounded-lg border border-[#E1E1E1] bg-white px-5 py-2 text-sm font-semibold text-[#444444] transition-colors duration-200 ease-[ease] hover:bg-[#F8F8F8] disabled:cursor-not-allowed disabled:bg-[#F6F6F6] disabled:text-[#A5A5A5]"
                 >
@@ -941,7 +943,7 @@ function WorkInputModal() {
                 </button>
                 <button
                   type="button"
-                  onClick={handleFinish}
+                  onClick={() => void updateWorkStatus("completed")}
                   className="rounded-lg bg-[#F5A200] px-5 py-2 text-sm font-bold text-white transition-colors duration-200 ease-[ease] hover:bg-[#E09700]"
                 >
                   作業終了

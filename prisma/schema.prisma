@@ -31,12 +31,27 @@ model customers {
 }
 
 model deliveries {
-  id            Int       @id @default(autoincrement())
-  delivery_no   String?   @db.VarChar(50)
-  customer_id   Int
-  delivery_date DateTime  @db.Date
-  total_amount  Decimal?  @db.Decimal(12, 2)
-  created_at    DateTime? @default(now()) @db.Timestamp(6)
+  id             Int              @id @default(autoincrement())
+  delivery_no    String?          @db.VarChar(50)
+  customer_id    Int
+  delivery_date  DateTime         @db.Date
+  total_amount   Decimal?         @db.Decimal(12, 2)
+  created_at     DateTime?        @default(now()) @db.Timestamp(6)
+  delivery_items delivery_items[]
+}
+
+model delivery_items {
+  id            Int         @id @default(autoincrement())
+  delivery_id   Int
+  order_item_id Int
+  quantity      Int
+  unit_price    Decimal     @db.Decimal(10, 2)
+  amount        Decimal     @db.Decimal(12, 2)
+  created_at    DateTime?   @default(now()) @db.Timestamp(6)
+  deliveries    deliveries  @relation(fields: [delivery_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  order_items   order_items @relation(fields: [order_item_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([delivery_id, order_item_id])
 }
 
 model insurance_items {
@@ -72,13 +87,14 @@ model order_files {
 }
 
 model order_items {
-  id                Int       @id @default(autoincrement())
+  id                Int              @id @default(autoincrement())
   order_id          Int
   insurance_item_id Int?
   private_item_id   Int?
-  quantity          Int?      @default(1)
-  unit_price        Decimal?  @db.Decimal(10, 2)
-  created_at        DateTime? @default(now()) @db.Timestamp(6)
+  quantity          Int?             @default(1)
+  unit_price        Decimal?         @db.Decimal(10, 2)
+  created_at        DateTime?        @default(now()) @db.Timestamp(6)
+  delivery_items    delivery_items[]
 }
 
 model order_teeth {
@@ -97,6 +113,7 @@ model orders {
   delivery_date  DateTime? @db.Date
   insurance_type String?   @db.VarChar(20)
   remarks        String?
+  work_status    String    @default("pending") @db.VarChar(20)
   billed         Boolean?  @default(false)
   created_at     DateTime? @default(now()) @db.Timestamp(6)
 }

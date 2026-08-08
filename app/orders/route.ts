@@ -9,6 +9,18 @@ export const runtime = "nodejs";
 const MAX_PDF_SIZE = 10 * 1024 * 1024;
 const orderFilesDirectory = path.join(process.cwd(), "storage", "order-files");
 
+function formatOrderNoDate(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return `${values.year}${values.month}${values.day}`;
+}
+
 async function parseOrderBody(req: NextRequest) {
   const contentType = req.headers.get("content-type") ?? "";
 
@@ -48,6 +60,15 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await parseOrderBody(req);
+    const orderDate = new Date(body.order_date);
+
+    if (Number.isNaN(orderDate.getTime())) {
+      return NextResponse.json(
+        { error: "Invalid order_date" },
+        { status: 400 }
+      );
+    }
+
     const insuranceItemId = Number(body.insurance_item_id);
     const rawToothNumbers: unknown[] = Array.isArray(body.tooth_numbers)
       ? body.tooth_numbers
@@ -124,11 +145,22 @@ export async function POST(req: NextRequest) {
     }
 
     const order = await prisma.$transaction(async (transaction) => {
+      const orderNoDate = formatOrderNoDate(orderDate);
+      const orderNoPrefix = `ORD-${orderNoDate}-`;
+      const [sequenceRow] = await transaction.$queryRaw<Array<{ max_seq: number }>>`
+        SELECT COALESCE(MAX(CAST(RIGHT(order_no, 3) AS INTEGER)), 0) AS max_seq
+        FROM orders
+        WHERE order_no LIKE ${`${orderNoPrefix}%`}
+      `;
+      const nextSequence = (sequenceRow?.max_seq ?? 0) + 1;
+      const orderNo = `${orderNoPrefix}${String(nextSequence).padStart(3, "0")}`;
+
       const createdOrder = await transaction.orders.create({
         data: {
+          order_no: orderNo,
           customer_id: body.customer_id,
           patient_id: body.patient_id,
-          order_date: new Date(body.order_date),
+          order_date: orderDate,
           delivery_date: body.delivery_date ? new Date(body.delivery_date) : null,
           insurance_type: body.insurance_type,
           remarks: body.remarks,
@@ -166,6 +198,8 @@ export async function POST(req: NextRequest) {
       }
 
       return createdOrder;
+    }, {
+      isolationLevel: "Serializable",
     });
 
     return NextResponse.json(order);
