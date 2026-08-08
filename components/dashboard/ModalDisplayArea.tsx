@@ -51,26 +51,47 @@ const dashboardCards: DashboardCard[] = [
   },
 ];
 
-const workTypeOptions = ["クラウン", "インレー", "義歯", "矯正装置"];
-const patientCandidates = [
-  "山田 太郎",
-  "佐藤 花子",
-  "高橋 健",
-  "田中 美咲",
-  "鈴木 一郎",
-];
-
 type ToothSetType = "permanent" | "deciduous";
 type CustomerOption = {
   id: number;
   code: string;
   name: string;
 };
+type PatientOption = {
+  id: number;
+  customer_id: number;
+  patient_name: string;
+  patient_kana: string | null;
+};
+type InsuranceItemOption = {
+  id: number;
+  category: string;
+  item_name: string;
+};
 
 const permanentRight = ["8", "7", "6", "5", "4", "3", "2", "1"];
 const permanentLeft = ["1", "2", "3", "4", "5", "6", "7", "8"];
 const deciduousRight = ["E", "D", "C", "B", "A"];
 const deciduousLeft = ["A", "B", "C", "D", "E"];
+
+function toFdiToothNumber(toothId: string) {
+  const [jaw, side, tooth] = toothId.split("-");
+  const isUpper = jaw === "上顎";
+  const isRight = side === "R";
+
+  if (/^[1-8]$/.test(tooth)) {
+    const quadrant = isUpper ? (isRight ? 1 : 2) : isRight ? 4 : 3;
+    return `${quadrant}${tooth}`;
+  }
+
+  const deciduousPosition = { A: 1, B: 2, C: 3, D: 4, E: 5 }[tooth];
+  if (deciduousPosition) {
+    const quadrant = isUpper ? (isRight ? 5 : 6) : isRight ? 8 : 7;
+    return `${quadrant}${deciduousPosition}`;
+  }
+
+  return null;
+}
 
 type WorkRecord = {
   id: string;
@@ -174,7 +195,7 @@ function ToothRow({
   onToggle: (toothId: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5 py-1">
       <p className="w-6 shrink-0 text-xs font-semibold text-[#444444]">{jawLabel}</p>
       <div className="grid flex-1 grid-cols-[12px_1fr_8px_1fr_12px] items-center gap-1">
         <span className="text-[10px] font-medium text-[#666666]">右</span>
@@ -189,7 +210,7 @@ function ToothRow({
                 key={id}
                 type="button"
                 onClick={() => onToggle(id)}
-                className={`h-6 w-6 shrink-0 rounded-md border p-0 text-[10px] font-semibold transition-[background-color,border-color] duration-200 ease-[ease] ${
+                className={`h-6 w-5 shrink-0 rounded-md border p-0 text-[10px] font-semibold transition-[background-color,border-color] duration-200 ease-[ease] ${
                   isSelected
                     ? "border-[#F5A200] bg-[#FFF4DE] text-[#A96E00]"
                     : "border-[#E5E5E5] bg-white text-[#444444]"
@@ -213,7 +234,7 @@ function ToothRow({
                 key={id}
                 type="button"
                 onClick={() => onToggle(id)}
-                className={`h-6 w-6 shrink-0 rounded-md border p-0 text-[10px] font-semibold transition-[background-color,border-color] duration-200 ease-[ease] ${
+                className={`h-6 w-5 shrink-0 rounded-md border p-0 text-[10px] font-semibold transition-[background-color,border-color] duration-200 ease-[ease] ${
                   isSelected
                     ? "border-[#F5A200] bg-[#FFF4DE] text-[#A96E00]"
                     : "border-[#E5E5E5] bg-white text-[#444444]"
@@ -236,19 +257,26 @@ function OrderEntryModal() {
   const [customerId, setCustomerId] = useState<number | null>(null);
   const [isCustomersLoading, setIsCustomersLoading] = useState(true);
   const [customersError, setCustomersError] = useState("");
+  const [patients, setPatients] = useState<PatientOption[]>([]);
+  const [patientId, setPatientId] = useState<number | null>(null);
+  const [isPatientSelected, setIsPatientSelected] = useState(false);
   const [patientQuery, setPatientQuery] = useState("");
-  const [workType, setWorkType] = useState(workTypeOptions[0]);
+  const [insuranceItems, setInsuranceItems] = useState<InsuranceItemOption[]>([]);
+  const [insuranceItemId, setInsuranceItemId] = useState<number | null>(null);
+  const [isInsuranceItemsLoading, setIsInsuranceItemsLoading] = useState(true);
+  const [insuranceItemsError, setInsuranceItemsError] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
   const [toothType, setToothType] = useState<ToothSetType>("permanent");
   const [selectedTeeth, setSelectedTeeth] = useState<Set<string>>(new Set());
   const [note, setNote] = useState("");
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfName, setPdfName] = useState("");
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState("");
   const [isDragActive, setIsDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const filteredPatients = patientCandidates.filter((name) =>
-    name.toLowerCase().includes(patientQuery.toLowerCase())
+  const filteredPatients = patients.filter((patient) =>
+    patient.patient_name.toLowerCase().includes(patientQuery.toLowerCase())
   );
 
   useEffect(() => {
@@ -292,6 +320,80 @@ function OrderEntryModal() {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadInsuranceItems = async () => {
+      try {
+        const response = await fetch("/api/insurance-items", {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch insurance items");
+        }
+
+        const data: InsuranceItemOption[] = await response.json();
+
+        if (data.length === 0) {
+          setInsuranceItemsError("作業内容が登録されていません");
+          return;
+        }
+
+        setInsuranceItems(data);
+        setInsuranceItemId(data[0].id);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        console.error(error);
+        setInsuranceItemsError("作業内容の取得に失敗しました");
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsInsuranceItemsLoading(false);
+        }
+      }
+    };
+
+    void loadInsuranceItems();
+
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (customerId === null) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const loadPatients = async () => {
+      try {
+        const response = await fetch(`/api/patients?customer_id=${customerId}`, {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch patients");
+        }
+
+        const data: PatientOption[] = await response.json();
+        setPatients(data);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        console.error(error);
+      }
+    };
+
+    void loadPatients();
+
+    return () => controller.abort();
+  }, [customerId]);
+
   const toggleTooth = (toothId: string) => {
     setSelectedTeeth((prev) => {
       const next = new Set(prev);
@@ -317,6 +419,7 @@ function OrderEntryModal() {
       URL.revokeObjectURL(pdfPreviewUrl);
     }
 
+  setPdfFile(file);
     setPdfName(file.name);
     setPdfPreviewUrl(URL.createObjectURL(file));
   };
@@ -342,25 +445,41 @@ function OrderEntryModal() {
       return;
     }
 
+    if (patientId === null) {
+      alert("患者を選択してください");
+      return;
+    }
+
+    if (insuranceItemId === null) {
+      alert("作業内容を選択してください");
+      return;
+    }
+
     console.log("submit!!");
     alert("submit!!");
 
-    const payload = {
-      customer_id: customerId,
-      patient_id: 1,
-      order_date: new Date().toISOString(),
-      delivery_date: deliveryDate || new Date().toISOString(),
-      insurance_type: "保険",
-      remarks: note,
-    };
+    const formData = new FormData();
+    formData.append("customer_id", String(customerId));
+    formData.append("patient_id", String(patientId));
+    formData.append("insurance_item_id", String(insuranceItemId));
+    formData.append("order_date", new Date().toISOString());
+    formData.append("delivery_date", deliveryDate || new Date().toISOString());
+    formData.append("insurance_type", "保険");
+    formData.append("remarks", note);
+
+    Array.from(selectedTeeth)
+      .map(toFdiToothNumber)
+      .filter((toothNumber): toothNumber is string => toothNumber !== null)
+      .forEach((toothNumber) => formData.append("tooth_numbers", toothNumber));
+
+    if (pdfFile) {
+      formData.append("pdf", pdfFile);
+    }
 
     try {
       const response = await fetch("/orders", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
+        body: formData,
       });
 
       if (!response.ok) {
@@ -402,15 +521,22 @@ function OrderEntryModal() {
         }}
       >
         <div className="min-h-0 flex-1">
-          <div className="grid h-full min-h-0 grid-cols-2 gap-4">
-            <div className="flex min-h-0 flex-col gap-3">
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-[#333333]">歯科医院</label>
-            <div className="flex gap-2">
+          <div className="flex h-full min-h-0 flex-col gap-1">
+            <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] gap-4">
+            <div className="flex min-h-0 flex-col gap-1">
+          <div className="flex h-10 items-center gap-3">
+            <label className="shrink-0 text-xs font-semibold text-[#333333]">歯科医院</label>
+            <div className="flex min-w-0 flex-1 gap-2">
               <select
                 name="clinic"
                 value={customerId ?? ""}
-                onChange={(event) => setCustomerId(Number(event.target.value))}
+                onChange={(event) => {
+                  setCustomerId(Number(event.target.value));
+                  setPatients([]);
+                  setPatientId(null);
+                  setIsPatientSelected(false);
+                  setPatientQuery("");
+                }}
                 disabled={isCustomersLoading || Boolean(customersError)}
                 className={`h-10 w-full rounded-lg border bg-white px-3 text-sm font-medium outline-none transition-colors focus:border-[#F0B132] disabled:opacity-100 ${
                   customersError
@@ -441,36 +567,44 @@ function OrderEntryModal() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-[#333333]">作業内容</label>
+          <div className="flex h-10 items-center gap-3">
+            <label className="shrink-0 text-xs font-semibold text-[#333333]">作業内容</label>
             <select
               name="work_type"
-              value={workType}
-              onChange={(event) => setWorkType(event.target.value)}
-              className="h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
+              value={insuranceItemId ?? ""}
+              onChange={(event) => setInsuranceItemId(Number(event.target.value))}
+              disabled={isInsuranceItemsLoading || Boolean(insuranceItemsError)}
+              className={`h-10 w-full rounded-lg border bg-white px-3 text-sm font-medium outline-none transition-colors focus:border-[#F0B132] disabled:opacity-100 ${
+                insuranceItemsError
+                  ? "border-[#D75A4A] text-[#B42318]"
+                  : "border-[#E2E2E2] text-[#333333]"
+              }`}
             >
-              {workTypeOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
+              {isInsuranceItemsLoading || insuranceItemsError ? (
+                <option value="">
+                  {isInsuranceItemsLoading ? "読み込み中..." : insuranceItemsError}
+                </option>
+              ) : null}
+              {insuranceItems.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.item_name}
                 </option>
               ))}
             </select>
-            </div>
+          </div>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-[#333333]">納品予定日</label>
+          <div className="flex h-10 items-center gap-3">
+              <label className="shrink-0 text-xs font-semibold text-[#333333]">納品予定日</label>
               <input
                 type="date"
                 name="delivery_date"
                 value={deliveryDate}
                 onChange={(event) => setDeliveryDate(event.target.value)}
-                className="h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
+                className="h-10 min-w-0 flex-1 rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
               />
-            </div>
           </div>
 
-          <div className="min-h-0 flex-1 space-y-2 rounded-[14px] border border-[#E7E7E7] bg-white p-2">
+          <div className="flex min-h-0 flex-1 flex-col gap-1 rounded-[14px] border border-[#E7E7E7] bg-white p-2">
             <div className="flex items-center justify-between gap-4">
               <label className="text-xs font-semibold text-[#333333]">歯番</label>
               <div className="flex gap-4">
@@ -497,7 +631,7 @@ function OrderEntryModal() {
               </div>
             </div>
 
-            <div className="space-y-1.5 rounded-lg border border-[#EFEFEF] bg-[#FCFCFC] p-2">
+            <div className="flex min-h-0 flex-1 flex-col justify-evenly rounded-lg border border-[#EFEFEF] bg-[#FCFCFC] px-1 py-1.5">
               <ToothRow
                 jawLabel="上顎"
                 rightTeeth={teethRight}
@@ -517,29 +651,37 @@ function OrderEntryModal() {
           </div>
             </div>
 
-            <div className="flex min-h-0 flex-col gap-3">
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-[#333333]">患者名</label>
-            <div className="flex gap-2">
+            <div className="flex min-h-0 flex-col gap-1">
+          <div className="flex h-10 items-center gap-3">
+            <label className="shrink-0 text-xs font-semibold text-[#333333]">患者名</label>
+            <div className="flex min-w-0 flex-1 gap-2">
               <div className="relative w-full">
                 <input
                   name="patient_name"
                   value={patientQuery}
-                  onChange={(event) => setPatientQuery(event.target.value)}
+                  onChange={(event) => {
+                    setPatientQuery(event.target.value);
+                    setPatientId(null);
+                    setIsPatientSelected(false);
+                  }}
                   placeholder="患者名を入力して検索"
                   className="h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
                 />
 
-                {patientQuery && filteredPatients.length > 0 ? (
+                {patientQuery && !isPatientSelected && filteredPatients.length > 0 ? (
                   <div className="absolute z-30 mt-1 w-full rounded-xl border border-[#ECECEC] bg-white p-1">
-                    {filteredPatients.map((name) => (
+                    {filteredPatients.map((patient) => (
                       <button
-                        key={name}
+                        key={patient.id}
                         type="button"
-                        onClick={() => setPatientQuery(name)}
+                        onClick={() => {
+                          setPatientQuery(patient.patient_name);
+                          setPatientId(patient.id);
+                          setIsPatientSelected(true);
+                        }}
                         className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[#333333] hover:bg-[#FFF8EA]"
                       >
-                        {name}
+                        {patient.patient_name}
                       </button>
                     ))}
                   </div>
@@ -607,23 +749,26 @@ function OrderEntryModal() {
             </div>
           </div>
 
-          <div className="space-y-1.5">
+            </div>
+          </div>
+
+          <div className="shrink-0 space-y-0.5">
             <label className="text-xs font-semibold text-[#333333]">備考</label>
             <textarea
               value={note}
               onChange={(event) => setNote(event.target.value)}
-              rows={2}
-              className="w-full rounded-[12px] border border-[#E2E2E2] bg-white px-3 py-2 text-sm text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
+              rows={1}
+              className="h-10 w-full resize-none rounded-[12px] border border-[#E2E2E2] bg-white px-3 py-2 text-sm text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
               placeholder="備考を入力してください"
             />
           </div>
-            </div>
-          </div>
+        </div>
         </div>
 
         <div className="mt-3 flex shrink-0 items-center justify-end gap-2 border-t border-[#ECECEC] bg-white pt-3">
           <input type="hidden" name="customer_id" value={customerId ?? ""} />
-          <input type="hidden" name="patient_id" value="1" />
+          <input type="hidden" name="patient_id" value={patientId ?? ""} />
+          <input type="hidden" name="insurance_item_id" value={insuranceItemId ?? ""} />
           <input type="hidden" name="insurance_type" value="保険" />
           <button
             type="button"
