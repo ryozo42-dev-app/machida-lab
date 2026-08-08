@@ -68,6 +68,42 @@ function parseDeliveryItems(value: unknown): DeliveryItemRequest[] {
   return items;
 }
 
+function formatDate(date: Date, separator = "") {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return `${values.year}${separator}${values.month}${separator}${values.day}`;
+}
+
+function createNextDeliveryNo(deliveryDate: Date, existingDeliveryNos: string[]) {
+  const dateKey = formatDate(deliveryDate);
+  const prefix = `DEL-${dateKey}-`;
+  const pattern = new RegExp(`^${prefix}(\\d+)$`);
+
+  const maxSequence = existingDeliveryNos.reduce((max, value) => {
+    const match = value.match(pattern);
+
+    if (!match) {
+      return max;
+    }
+
+    const sequence = Number(match[1]);
+
+    if (!Number.isInteger(sequence) || sequence <= max) {
+      return max;
+    }
+
+    return sequence;
+  }, 0);
+
+  return `${prefix}${String(maxSequence + 1).padStart(3, "0")}`;
+}
+
 function addUniquePrice(
   prices: Map<number, Prisma.Decimal>,
   itemId: number,
@@ -127,20 +163,16 @@ export async function POST(request: NextRequest) {
     }
 
     const body = parsedBody as Record<string, unknown>;
+    const customerId = parsePositiveInteger(body.customer_id, "customer_id");
     const deliveryDate = parseDeliveryDate(body.delivery_date);
     const items = parseDeliveryItems(body.items);
-    const deliveryNo =
-      body.delivery_no === null || body.delivery_no === undefined
-        ? null
-        : String(body.delivery_no).trim();
-
-    if (deliveryNo !== null && deliveryNo.length > 50) {
-      throw new DeliveryRequestError("delivery_no must be 50 characters or fewer");
-    }
 
     const delivery = await prisma.$transaction(
       async (transaction) => {
         const orderItemIds = items.map((item) => item.order_item_id);
+        const requestedQuantityByOrderItemId = new Map(
+          items.map((item) => [item.order_item_id, item.quantity])
+        );
         const orderItems = await transaction.order_items.findMany({
           where: {
             id: {
@@ -157,7 +189,25 @@ export async function POST(request: NextRequest) {
         });
 
         if (orderItems.length !== orderItemIds.length) {
-          throw new DeliveryRequestError("One or more order_items do not exist");
+          throw new DeliveryRequestError("指定された受注明細が存在しません", 409);
+        }
+
+        const deliveredOrderItems = await transaction.delivery_items.findMany({
+          where: {
+            order_item_id: {
+              in: orderItemIds,
+            },
+          },
+          select: {
+            order_item_id: true,
+          },
+        });
+
+        if (deliveredOrderItems.length > 0) {
+          throw new DeliveryRequestError(
+            "すでに納品済みの受注が含まれています。画面を更新してください。",
+            409
+          );
         }
 
         const orders = await transaction.orders.findMany({
@@ -169,65 +219,48 @@ export async function POST(request: NextRequest) {
           select: {
             id: true,
             customer_id: true,
+            work_status: true,
+            billed: true,
           },
         });
-        const customerByOrderId = new Map(
-          orders.map((order) => [order.id, order.customer_id])
-        );
-        const customerIds = new Set(
-          orderItems.map((item) => customerByOrderId.get(item.order_id))
-        );
 
-        if (customerIds.has(undefined)) {
-          throw new DeliveryRequestError(
-            "An order referenced by order_items does not exist",
-            409
-          );
+        if (orders.length !== new Set(orderItems.map((item) => item.order_id)).size) {
+          throw new DeliveryRequestError("対象受注が存在しません", 409);
         }
 
-        if (customerIds.size !== 1) {
-          throw new DeliveryRequestError(
-            "All order_items in a delivery must belong to the same customer"
-          );
-        }
-
-        const customerId = [...customerIds][0] as number;
-        const deliveredQuantities = await transaction.delivery_items.groupBy({
-          by: ["order_item_id"],
-          where: {
-            order_item_id: {
-              in: orderItemIds,
-            },
-          },
-          _sum: {
-            quantity: true,
-          },
-        });
-        const deliveredQuantityByOrderItemId = new Map(
-          deliveredQuantities.map((item) => [
-            item.order_item_id,
-            item._sum.quantity ?? 0,
-          ])
-        );
-        const requestedQuantityByOrderItemId = new Map(
-          items.map((item) => [item.order_item_id, item.quantity])
-        );
-
-        for (const orderItem of orderItems) {
-          if (orderItem.quantity === null || orderItem.quantity <= 0) {
+        for (const order of orders) {
+          if (order.work_status !== "completed") {
             throw new DeliveryRequestError(
-              `order_item ${orderItem.id} has an invalid quantity`,
+              "作業完了していない受注が含まれています",
               409
             );
           }
 
-          const alreadyDelivered =
-            deliveredQuantityByOrderItemId.get(orderItem.id) ?? 0;
+          if (order.billed ?? false) {
+            throw new DeliveryRequestError("請求済みの受注は納品確定できません", 409);
+          }
+
+          if (order.customer_id !== customerId) {
+            throw new DeliveryRequestError(
+              "異なる歯科医院の受注を同じ納品書に混在できません",
+              409
+            );
+          }
+        }
+
+        for (const orderItem of orderItems) {
+          if (orderItem.quantity === null || orderItem.quantity <= 0) {
+            throw new DeliveryRequestError(
+              `order_item ${orderItem.id} の数量が不正です`,
+              409
+            );
+          }
+
           const requested = requestedQuantityByOrderItemId.get(orderItem.id) ?? 0;
 
-          if (alreadyDelivered + requested > orderItem.quantity) {
+          if (requested !== orderItem.quantity) {
             throw new DeliveryRequestError(
-              `Delivery quantity exceeds the remaining quantity for order_item ${orderItem.id}`,
+              `order_item ${orderItem.id} の数量が最新状態と一致しません。画面を更新してください。`,
               409
             );
           }
@@ -309,7 +342,7 @@ export async function POST(request: NextRequest) {
 
           if (hasInsuranceItem === hasPrivateItem) {
             throw new DeliveryRequestError(
-              `order_item ${orderItem.id} must reference exactly one price item`,
+              `order_item ${orderItem.id} の作業内容設定が不正です`,
               409
             );
           }
@@ -321,19 +354,19 @@ export async function POST(request: NextRequest) {
 
           if (unitPrice === undefined) {
             throw new DeliveryRequestError(
-              `No price is configured for order_item ${orderItem.id}`,
+              `order_item ${orderItem.id} の単価が設定されていません`,
               409
             );
           }
 
           if (unitPrice.lessThan(0)) {
             throw new DeliveryRequestError(
-              `Price must not be negative for order_item ${orderItem.id}`,
+              `order_item ${orderItem.id} の単価が不正です`,
               409
             );
           }
 
-          const quantity = requestedQuantityByOrderItemId.get(orderItem.id) as number;
+          const quantity = orderItem.quantity as number;
 
           return {
             order_item_id: orderItem.id,
@@ -347,9 +380,39 @@ export async function POST(request: NextRequest) {
           new Prisma.Decimal(0)
         );
 
-        return transaction.deliveries.create({
+        const existingDeliveryNos = await transaction.deliveries.findMany({
+          where: {
+            delivery_date: deliveryDate,
+            delivery_no: {
+              startsWith: `DEL-${formatDate(deliveryDate)}-`,
+            },
+          },
+          select: {
+            delivery_no: true,
+          },
+        });
+        const nextDeliveryNo = createNextDeliveryNo(
+          deliveryDate,
+          existingDeliveryNos.flatMap((row) => (row.delivery_no ? [row.delivery_no] : []))
+        );
+
+        const customer = await transaction.customers.findUnique({
+          where: {
+            id: customerId,
+          },
+          select: {
+            id: true,
+            name: true,
+          },
+        });
+
+        if (!customer) {
+          throw new DeliveryRequestError("歯科医院が存在しません", 409);
+        }
+
+        const createdDelivery = await transaction.deliveries.create({
           data: {
-            delivery_no: deliveryNo || null,
+            delivery_no: nextDeliveryNo,
             customer_id: customerId,
             delivery_date: deliveryDate,
             total_amount: totalAmount,
@@ -365,6 +428,11 @@ export async function POST(request: NextRequest) {
             },
           },
         });
+
+        return {
+          ...createdDelivery,
+          customer_name: customer.name,
+        };
       },
       {
         isolationLevel: "Serializable",
@@ -385,6 +453,13 @@ export async function POST(request: NextRequest) {
       error instanceof Prisma.PrismaClientKnownRequestError &&
       ["P2002", "P2003", "P2034"].includes(error.code)
     ) {
+      if (error.code === "P2002") {
+        return NextResponse.json(
+          { error: "すでに納品済みの受注が含まれています。画面を更新してください。" },
+          { status: 409 }
+        );
+      }
+
       return NextResponse.json(
         { error: "The delivery could not be created due to conflicting data" },
         { status: 409 }

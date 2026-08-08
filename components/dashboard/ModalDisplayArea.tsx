@@ -107,6 +107,75 @@ type WorkRecord = {
   pdfUrl: string | null;
 };
 
+type DeliveryCandidate = {
+  order_item_id: number;
+  order_id: number;
+  order_no: string;
+  customer_id: number;
+  customer_name: string;
+  patient_id: number;
+  patient_name: string;
+  work_type_name: string;
+  tooth_numbers: string[];
+  delivery_date: string | null;
+  quantity: number;
+  unit_price_preview: string | null;
+  amount_preview: string | null;
+  remarks: string;
+  work_status: string;
+  billed: boolean;
+};
+
+type ConfirmedDeliveryItem = {
+  order_item_id: number;
+  patient_name: string;
+  order_no: string;
+  work_type_name: string;
+  tooth_numbers: string[];
+  quantity: number;
+  unit_price: string | null;
+  amount: string | null;
+};
+
+type ConfirmedDelivery = {
+  id: number;
+  delivery_no: string;
+  customer_name: string;
+  delivery_date: string;
+  total_amount: string | null;
+  items: ConfirmedDeliveryItem[];
+};
+
+function getTodayJstString() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function formatYen(value: string | null) {
+  if (value === null) {
+    return "-";
+  }
+
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return value;
+  }
+
+  return new Intl.NumberFormat("ja-JP", {
+    style: "currency",
+    currency: "JPY",
+    maximumFractionDigits: 0,
+  }).format(number);
+}
+
 function DashboardModal() {
   const handleCardClick = (card: DashboardCard) => {
     console.log(`[Dashboard] ${card.id} clicked`);
@@ -263,6 +332,8 @@ function OrderEntryModal() {
   const [patientId, setPatientId] = useState<number | null>(null);
   const [isPatientSelected, setIsPatientSelected] = useState(false);
   const [patientQuery, setPatientQuery] = useState("");
+  const [patientKana, setPatientKana] = useState("");
+  const [isPatientCreating, setIsPatientCreating] = useState(false);
   const [insuranceItems, setInsuranceItems] = useState<InsuranceItemOption[]>([]);
   const [insuranceItemId, setInsuranceItemId] = useState<number | null>(null);
   const [isInsuranceItemsLoading, setIsInsuranceItemsLoading] = useState(true);
@@ -495,6 +566,78 @@ function OrderEntryModal() {
     }
   };
 
+  const createPatient = async () => {
+    if (isPatientCreating) {
+      return;
+    }
+
+    if (customerId === null) {
+      alert("歯科医院を選択してください");
+      return;
+    }
+
+    const nextPatientName = patientQuery.trim();
+
+    if (nextPatientName.length === 0) {
+      alert("患者名を入力してください");
+      return;
+    }
+
+    setIsPatientCreating(true);
+
+    try {
+      const response = await fetch("/api/patients", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          customer_id: customerId,
+          patient_name: nextPatientName,
+          patient_kana: patientKana.trim() || null,
+        }),
+      });
+
+      if (!response.ok) {
+        let errorMessage = "患者追加に失敗しました";
+
+        try {
+          const errorBody = (await response.json()) as { error?: string };
+          if (errorBody.error) {
+            errorMessage = errorBody.error;
+          }
+        } catch {
+          // ignore invalid error response
+        }
+
+        throw new Error(errorMessage);
+      }
+
+      const createdPatient = (await response.json()) as PatientOption;
+
+      setPatients((currentPatients) => {
+        const mergedPatients = [
+          ...currentPatients.filter((patient) => patient.id !== createdPatient.id),
+          createdPatient,
+        ];
+
+        mergedPatients.sort((a, b) => a.patient_name.localeCompare(b.patient_name, "ja"));
+        return mergedPatients;
+      });
+      setPatientId(createdPatient.id);
+      setPatientQuery(createdPatient.patient_name);
+      setPatientKana(createdPatient.patient_kana ?? "");
+      setIsPatientSelected(true);
+
+      alert("患者を追加しました");
+    } catch (error) {
+      console.error(error);
+      alert(error instanceof Error ? error.message : "患者追加に失敗しました");
+    } finally {
+      setIsPatientCreating(false);
+    }
+  };
+
   const teethRight = toothType === "permanent" ? permanentRight : deciduousRight;
   const teethLeft = toothType === "permanent" ? permanentLeft : deciduousLeft;
 
@@ -538,6 +681,7 @@ function OrderEntryModal() {
                   setPatientId(null);
                   setIsPatientSelected(false);
                   setPatientQuery("");
+                  setPatientKana("");
                 }}
                 disabled={isCustomersLoading || Boolean(customersError)}
                 className={`h-10 w-full rounded-lg border bg-white px-3 text-sm font-medium outline-none transition-colors focus:border-[#F0B132] disabled:opacity-100 ${
@@ -679,6 +823,7 @@ function OrderEntryModal() {
                         onClick={() => {
                           setPatientQuery(patient.patient_name);
                           setPatientId(patient.id);
+                          setPatientKana(patient.patient_kana ?? "");
                           setIsPatientSelected(true);
                         }}
                         className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[#333333] hover:bg-[#FFF8EA]"
@@ -692,13 +837,27 @@ function OrderEntryModal() {
 
               <button
                 type="button"
-                onClick={() => console.log("[Order] add patient clicked")}
-                className="h-10 w-10 shrink-0 rounded-lg border border-[#E2E2E2] bg-white text-lg font-semibold text-[#A06A00] transition-colors duration-200 ease-[ease] hover:bg-[#FFF5E5]"
+                onClick={() => {
+                  void createPatient();
+                }}
+                disabled={isPatientCreating}
+                className="h-10 w-10 shrink-0 rounded-lg border border-[#E2E2E2] bg-white text-lg font-semibold text-[#A06A00] transition-colors duration-200 ease-[ease] hover:bg-[#FFF5E5] disabled:cursor-not-allowed disabled:opacity-60"
                 aria-label="患者を追加"
               >
-                +
+                {isPatientCreating ? "..." : "+"}
               </button>
             </div>
+          </div>
+
+          <div className="flex h-10 items-center gap-3">
+            <label className="shrink-0 text-xs font-semibold text-[#333333]">患者カナ</label>
+            <input
+              name="patient_kana"
+              value={patientKana}
+              onChange={(event) => setPatientKana(event.target.value)}
+              placeholder="患者カナを入力（任意）"
+              className="h-10 min-w-0 flex-1 rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
+            />
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col space-y-1.5">
@@ -795,6 +954,7 @@ function OrderEntryModal() {
 function WorkInputModal() {
   const [records, setRecords] = useState<WorkRecord[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [expandedClinics, setExpandedClinics] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const controller = new AbortController();
@@ -809,6 +969,12 @@ function WorkInputModal() {
 
         const data: WorkRecord[] = await response.json();
         setRecords(data);
+        const clinicNames = [...new Set(data.map((record) => record.clinic))];
+        setExpandedClinics((current) => {
+          const next = new Set([...current].filter((clinicName) => clinicNames.includes(clinicName)));
+
+          return next;
+        });
         setSelectedId((currentId) =>
           currentId !== null && data.some((record) => record.id === currentId)
             ? currentId
@@ -837,6 +1003,21 @@ function WorkInputModal() {
     acc[record.clinic].push(record);
     return acc;
   }, {});
+  const clinicEntries = Object.entries(groupedRecords);
+
+  const toggleClinic = (clinicName: string) => {
+    setExpandedClinics((current) => {
+      const next = new Set(current);
+
+      if (next.has(clinicName)) {
+        next.delete(clinicName);
+      } else {
+        next.add(clinicName);
+      }
+
+      return next;
+    });
+  };
 
   const updateWorkStatus = async (
     workStatus: "in_progress" | "completed"
@@ -953,65 +1134,503 @@ function WorkInputModal() {
           ) : null}
         </div>
 
-        <div className="flex min-h-0 flex-[2] rounded-[16px] border border-[#E8E8E8] bg-white p-4">
-          <div className="w-full">
+        <div className="flex min-h-0 flex-[2] overflow-hidden rounded-[16px] border border-[#E8E8E8] bg-white p-4">
+          <div className="flex min-h-0 w-full flex-col">
             <p className="text-sm font-semibold text-[#333333]">本日の作業一覧</p>
 
-            <div className="mt-3 space-y-3 text-sm">
-              {Object.entries(groupedRecords).map(([clinicName, clinicRecords]) => (
-                <div key={clinicName} className="rounded-lg border border-[#EEEEEE] bg-[#FCFCFC]">
-                  <div className="border-b border-[#ECECEC] px-3 py-2 text-xs font-bold text-[#555555]">
-                    【{clinicName}】
-                  </div>
+            <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 text-sm">
+              {clinicEntries.map(([clinicName, clinicRecords]) => {
+                const isExpanded = expandedClinics.has(clinicName);
 
-                  <div>
-                    {clinicRecords.map((record) => {
-                      const isSelected = record.id === selectedId;
-                      return (
-                        <button
-                          key={record.id}
-                          type="button"
-                          onClick={() => setSelectedId(record.id)}
-                          className={`grid w-full grid-cols-[1fr_1fr_1fr_auto] items-center gap-3 border-b border-[#EFEFEF] px-3 py-2 text-left last:border-b-0 transition-colors duration-150 ease-[ease] ${
-                            isSelected ? "bg-[#FFF8EA]" : "bg-transparent hover:bg-[#FFFDF7]"
-                          } ${record.completed ? "text-[#9AA0AA]" : "text-[#2A2A2A]"}`}
-                        >
-                          <span className="flex min-w-0 items-center gap-1.5">
-                            {record.completed ? (
-                              <svg
-                                viewBox="0 0 24 24"
-                                className="h-4 w-4 shrink-0 text-[#7E8591]"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                aria-hidden="true"
-                              >
-                                <circle cx="12" cy="12" r="9" />
-                                <path d="m8.5 12 2.3 2.3 4.7-4.8" />
-                              </svg>
-                            ) : null}
-                            <span className="truncate">{record.patient}</span>
-                          </span>
-                          <span className="truncate">{record.workType}</span>
-                          <span className="truncate">{record.deliveryDate}</span>
-                          {record.completed ? (
-                            <span className="inline-flex items-center text-xs font-semibold text-[#7E8591]">
-                              完了
+                return (
+                <div key={clinicName} className="rounded-lg border border-[#EEEEEE] bg-[#FCFCFC]">
+                  <button
+                    type="button"
+                    onClick={() => toggleClinic(clinicName)}
+                    className="flex w-full items-center justify-between border-b border-[#ECECEC] px-3 py-2 text-left"
+                    aria-expanded={isExpanded}
+                    aria-label={`${clinicName} の作業一覧を${isExpanded ? "閉じる" : "開く"}`}
+                  >
+                    <span className="flex min-w-0 items-center gap-2 text-xs font-bold text-[#555555]">
+                      <span className="text-[11px] text-[#666666]">{isExpanded ? "▼" : "▶"}</span>
+                      <span className="truncate">【{clinicName}】</span>
+                    </span>
+                    <span className="shrink-0 text-xs font-semibold text-[#666666]">{clinicRecords.length}件</span>
+                  </button>
+
+                  {isExpanded ? (
+                    <div>
+                      {clinicRecords.map((record) => {
+                        const isSelected = record.id === selectedId;
+                        return (
+                          <button
+                            key={record.id}
+                            type="button"
+                            onClick={() => setSelectedId(record.id)}
+                            className={`grid w-full grid-cols-[1fr_1fr_1fr_auto] items-center gap-3 border-b border-[#EFEFEF] px-3 py-2 text-left last:border-b-0 transition-colors duration-150 ease-[ease] ${
+                              isSelected ? "bg-[#FFF8EA]" : "bg-transparent hover:bg-[#FFFDF7]"
+                            } ${record.completed ? "text-[#9AA0AA]" : "text-[#2A2A2A]"}`}
+                          >
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              {record.completed ? (
+                                <svg
+                                  viewBox="0 0 24 24"
+                                  className="h-4 w-4 shrink-0 text-[#7E8591]"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  aria-hidden="true"
+                                >
+                                  <circle cx="12" cy="12" r="9" />
+                                  <path d="m8.5 12 2.3 2.3 4.7-4.8" />
+                                </svg>
+                              ) : null}
+                              <span className="truncate">{record.patient}</span>
                             </span>
-                          ) : (
-                            <span className="text-xs text-[#666666]">作業中</span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
+                            <span className="truncate">{record.workType}</span>
+                            <span className="truncate">{record.deliveryDate}</span>
+                            {record.completed ? (
+                              <span className="inline-flex items-center text-xs font-semibold text-[#7E8591]">
+                                完了
+                              </span>
+                            ) : (
+                              <span className="text-xs text-[#666666]">作業中</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function DeliveryCandidatesModal() {
+  const [dateFilter, setDateFilter] = useState(getTodayJstString());
+  const [customerFilter, setCustomerFilter] = useState<number | null>(null);
+  const [candidates, setCandidates] = useState<DeliveryCandidate[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(new Set());
+  const [submitError, setSubmitError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [confirmedDelivery, setConfirmedDelivery] = useState<ConfirmedDelivery | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadCandidates = async () => {
+      try {
+        setIsLoading(true);
+        setError("");
+
+        const params = new URLSearchParams();
+        if (dateFilter) {
+          params.set("date", dateFilter);
+        }
+        if (customerFilter !== null) {
+          params.set("customer_id", String(customerFilter));
+        }
+
+        const query = params.toString();
+        const url = query ? `/deliveries/candidates?${query}` : "/deliveries/candidates";
+        const response = await fetch(url, { signal: controller.signal });
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch delivery candidates");
+        }
+
+        const data: DeliveryCandidate[] = await response.json();
+        setCandidates(data);
+        setSubmitError("");
+        setSelectedItemIds((current) => {
+          const existing = new Set(data.map((item) => item.order_item_id));
+          return new Set([...current].filter((id) => existing.has(id)));
+        });
+      } catch (loadError) {
+        if (loadError instanceof DOMException && loadError.name === "AbortError") {
+          return;
+        }
+
+        console.error(loadError);
+        setCandidates([]);
+        setError("納品候補の取得に失敗しました");
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void loadCandidates();
+
+    return () => controller.abort();
+  }, [dateFilter, customerFilter, reloadKey]);
+
+  const customerOptions = Array.from(
+    candidates.reduce<Map<number, string>>((acc, item) => {
+      if (!acc.has(item.customer_id)) {
+        acc.set(item.customer_id, item.customer_name);
+      }
+      return acc;
+    }, new Map())
+  )
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name, "ja"));
+
+  const toggleSelection = (orderItemId: number) => {
+    setSelectedItemIds((current) => {
+      const next = new Set(current);
+      if (next.has(orderItemId)) {
+        next.delete(orderItemId);
+      } else {
+        next.add(orderItemId);
+      }
+      return next;
+    });
+  };
+
+  const selectedCandidates = candidates.filter((item) =>
+    selectedItemIds.has(item.order_item_id)
+  );
+  const selectedAmount = selectedCandidates.reduce((sum, item) => {
+    const amount = item.amount_preview === null ? 0 : Number(item.amount_preview);
+    return Number.isFinite(amount) ? sum + amount : sum;
+  }, 0);
+
+  const submitDelivery = async () => {
+    if (!dateFilter) {
+      setSubmitError("納品予定日を指定してください");
+      return;
+    }
+
+    if (selectedCandidates.length === 0 || isSubmitting) {
+      return;
+    }
+
+    const customerIds = new Set(selectedCandidates.map((item) => item.customer_id));
+
+    if (customerIds.size !== 1) {
+      setSubmitError("異なる歯科医院の受注を同じ納品書に混在できません");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitError("");
+
+    try {
+      const response = await fetch("/deliveries", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          customer_id: selectedCandidates[0].customer_id,
+          delivery_date: dateFilter,
+          items: selectedCandidates.map((item) => ({
+            order_item_id: item.order_item_id,
+            quantity: item.quantity,
+          })),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const message =
+          typeof data?.error === "string" ? data.error : "納品確定に失敗しました";
+
+        if (response.status === 409) {
+          if (message.includes("すでに納品済み")) {
+            setSubmitError(
+              "すでに納品済みの受注が含まれています。画面を更新してください。"
+            );
+          } else {
+            setSubmitError(message);
+          }
+        } else {
+          setSubmitError(message);
+        }
+
+        return;
+      }
+
+      const deliveryItemsByOrderItemId = new Map(
+        (data.delivery_items as Array<{
+          order_item_id: number;
+          quantity: number;
+          unit_price: string;
+          amount: string;
+        }>).map((item) => [item.order_item_id, item])
+      );
+      const confirmedItems: ConfirmedDeliveryItem[] = selectedCandidates.map((candidate) => {
+        const deliveryItem = deliveryItemsByOrderItemId.get(candidate.order_item_id);
+
+        return {
+          order_item_id: candidate.order_item_id,
+          patient_name: candidate.patient_name,
+          order_no: candidate.order_no,
+          work_type_name: candidate.work_type_name,
+          tooth_numbers: candidate.tooth_numbers,
+          quantity: deliveryItem?.quantity ?? candidate.quantity,
+          unit_price: deliveryItem?.unit_price ?? candidate.unit_price_preview,
+          amount: deliveryItem?.amount ?? candidate.amount_preview,
+        };
+      });
+
+      setConfirmedDelivery({
+        id: Number(data.id),
+        delivery_no: String(data.delivery_no ?? ""),
+        customer_name:
+          typeof data.customer_name === "string"
+            ? data.customer_name
+            : selectedCandidates[0].customer_name,
+        delivery_date:
+          typeof data.delivery_date === "string"
+            ? data.delivery_date.slice(0, 10)
+            : dateFilter,
+        total_amount:
+          typeof data.total_amount === "string" || data.total_amount === null
+            ? data.total_amount
+            : String(data.total_amount),
+        items: confirmedItems,
+      });
+      setSelectedItemIds(new Set());
+      setReloadKey((current) => current + 1);
+    } catch (submitDeliveryError) {
+      console.error(submitDeliveryError);
+      setSubmitError("納品確定に失敗しました");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (confirmedDelivery) {
+    return (
+      <section
+        className="flex h-full min-h-[340px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6"
+        aria-label="納品書詳細"
+      >
+        <div className="h-[14px] w-full rounded-t-[20px] bg-[#F5A200]" aria-hidden="true" />
+
+        <div className="mt-3 flex items-start gap-3">
+          <span className="mt-1 h-10 w-[5px] rounded-full bg-[#F5A200]" aria-hidden="true" />
+          <div>
+            <h2 className="text-2xl font-bold text-[#222222]">納品書詳細</h2>
+            <p className="mt-1 text-xs text-[#666666]">納品確定が完了しました</p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 rounded-[14px] border border-[#E8E8E8] bg-[#FCFCFC] p-4 text-sm">
+          <p><span className="font-semibold text-[#555555]">納品書番号:</span> <span className="text-[#222222]">{confirmedDelivery.delivery_no}</span></p>
+          <p><span className="font-semibold text-[#555555]">歯科医院:</span> <span className="text-[#222222]">{confirmedDelivery.customer_name}</span></p>
+          <p><span className="font-semibold text-[#555555]">納品日:</span> <span className="text-[#222222]">{confirmedDelivery.delivery_date}</span></p>
+          <p><span className="font-semibold text-[#555555]">合計金額:</span> <span className="text-[#222222]">{formatYen(confirmedDelivery.total_amount)}</span></p>
+        </div>
+
+        <div className="mt-4 min-h-0 flex-1 overflow-auto rounded-[16px] border border-[#E8E8E8] bg-white">
+          <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+            <thead className="sticky top-0 z-10 bg-[#FCFCFC] text-xs font-bold text-[#555555]">
+              <tr>
+                <th className="border-b border-[#ECECEC] px-3 py-2">患者名</th>
+                <th className="border-b border-[#ECECEC] px-3 py-2">受注No</th>
+                <th className="border-b border-[#ECECEC] px-3 py-2">作業内容</th>
+                <th className="border-b border-[#ECECEC] px-3 py-2">歯番</th>
+                <th className="border-b border-[#ECECEC] px-3 py-2 text-right">数量</th>
+                <th className="border-b border-[#ECECEC] px-3 py-2 text-right">単価</th>
+                <th className="border-b border-[#ECECEC] px-3 py-2 text-right">金額</th>
+              </tr>
+            </thead>
+            <tbody>
+              {confirmedDelivery.items.map((item) => (
+                <tr key={item.order_item_id} className="border-b border-[#EFEFEF] text-[#2A2A2A]">
+                  <td className="px-3 py-2">{item.patient_name}</td>
+                  <td className="px-3 py-2">{item.order_no}</td>
+                  <td className="px-3 py-2">{item.work_type_name}</td>
+                  <td className="px-3 py-2">{item.tooth_numbers.join(", ") || "-"}</td>
+                  <td className="px-3 py-2 text-right">{item.quantity}</td>
+                  <td className="px-3 py-2 text-right">{formatYen(item.unit_price)}</td>
+                  <td className="px-3 py-2 text-right">{formatYen(item.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-3 flex shrink-0 justify-end gap-2 border-t border-[#ECECEC] pt-3">
+          <button
+            type="button"
+            onClick={() =>
+              window.open(`/deliveries/${confirmedDelivery.id}/pdf`, "_blank", "noopener,noreferrer")
+            }
+            className="rounded-lg bg-[#F5A200] px-5 py-2 text-sm font-bold text-white transition-colors duration-200 ease-[ease] hover:bg-[#E09700]"
+          >
+            納品書PDF
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setConfirmedDelivery(null)}
+            className="rounded-lg border border-[#E1E1E1] bg-white px-5 py-2 text-sm font-semibold text-[#444444] transition-colors duration-200 ease-[ease] hover:bg-[#F8F8F8]"
+          >
+            納品候補一覧に戻る
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section
+      className="flex h-full min-h-[340px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6"
+      aria-label="納品書"
+    >
+      <div className="h-[14px] w-full rounded-t-[20px] bg-[#F5A200]" aria-hidden="true" />
+
+      <div className="mt-3 flex items-start gap-3">
+        <span className="mt-1 h-10 w-[5px] rounded-full bg-[#F5A200]" aria-hidden="true" />
+        <div>
+          <h2 className="text-2xl font-bold text-[#222222]">納品書</h2>
+          <p className="mt-1 text-xs text-[#666666]">作業完了済みの納品候補を確認します</p>
+        </div>
+      </div>
+
+      <div className="mt-4 flex items-center gap-3">
+        <label className="text-xs font-semibold text-[#333333]">納品予定日</label>
+        <input
+          type="date"
+          value={dateFilter}
+          onChange={(event) => setDateFilter(event.target.value)}
+          className="h-9 rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
+        />
+
+        <label className="ml-2 text-xs font-semibold text-[#333333]">歯科医院</label>
+        <select
+          value={customerFilter ?? ""}
+          onChange={(event) =>
+            setCustomerFilter(event.target.value === "" ? null : Number(event.target.value))
+          }
+          className="h-9 min-w-[220px] rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
+        >
+          <option value="">すべて</option>
+          {customerOptions.map((customer) => (
+            <option key={customer.id} value={customer.id}>
+              {customer.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="mt-4 min-h-0 flex-1 overflow-auto rounded-[16px] border border-[#E8E8E8] bg-white">
+        <table className="w-full min-w-[1040px] border-collapse text-left text-sm">
+          <thead className="sticky top-0 z-10 bg-[#FCFCFC] text-xs font-bold text-[#555555]">
+            <tr>
+              <th className="w-10 border-b border-[#ECECEC] px-3 py-2">選択</th>
+              <th className="border-b border-[#ECECEC] px-3 py-2">医院グループ</th>
+              <th className="border-b border-[#ECECEC] px-3 py-2">患者名</th>
+              <th className="border-b border-[#ECECEC] px-3 py-2">受注No</th>
+              <th className="border-b border-[#ECECEC] px-3 py-2">作業内容</th>
+              <th className="border-b border-[#ECECEC] px-3 py-2">歯番</th>
+              <th className="border-b border-[#ECECEC] px-3 py-2">納品予定日</th>
+              <th className="border-b border-[#ECECEC] px-3 py-2 text-right">数量</th>
+              <th className="border-b border-[#ECECEC] px-3 py-2 text-right">単価</th>
+              <th className="border-b border-[#ECECEC] px-3 py-2 text-right">金額</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+              <tr>
+                <td colSpan={10} className="px-3 py-8 text-center text-sm text-[#666666]">
+                  読み込み中...
+                </td>
+              </tr>
+            ) : null}
+
+            {!isLoading && error ? (
+              <tr>
+                <td colSpan={10} className="px-3 py-8 text-center text-sm text-[#B42318]">
+                  {error}
+                </td>
+              </tr>
+            ) : null}
+
+            {!isLoading && !error && candidates.length === 0 ? (
+              <tr>
+                <td colSpan={10} className="px-3 py-8 text-center text-sm text-[#666666]">
+                  条件に一致する納品候補はありません
+                </td>
+              </tr>
+            ) : null}
+
+            {!isLoading && !error
+              ? candidates.map((item) => {
+                  const isSelected = selectedItemIds.has(item.order_item_id);
+                  return (
+                    <tr
+                      key={item.order_item_id}
+                      className={`border-b border-[#EFEFEF] text-[#2A2A2A] transition-colors duration-150 ease-[ease] ${
+                        isSelected ? "bg-[#FFF8EA]" : "hover:bg-[#FFFDF7]"
+                      }`}
+                    >
+                      <td className="px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelection(item.order_item_id)}
+                          className="h-4 w-4 accent-[#F5A200]"
+                          aria-label={`候補${item.order_item_id}を選択`}
+                        />
+                      </td>
+                      <td className="px-3 py-2">{item.customer_name}</td>
+                      <td className="px-3 py-2">{item.patient_name}</td>
+                      <td className="px-3 py-2">{item.order_no}</td>
+                      <td className="px-3 py-2">{item.work_type_name}</td>
+                      <td className="px-3 py-2">{item.tooth_numbers.join(", ") || "-"}</td>
+                      <td className="px-3 py-2">{item.delivery_date ?? "-"}</td>
+                      <td className="px-3 py-2 text-right">{item.quantity}</td>
+                      <td className="px-3 py-2 text-right">{formatYen(item.unit_price_preview)}</td>
+                      <td className="px-3 py-2 text-right">{formatYen(item.amount_preview)}</td>
+                    </tr>
+                  );
+                })
+              : null}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-3 flex shrink-0 items-center justify-between border-t border-[#ECECEC] pt-3">
+        <div>
+          <p className="text-sm text-[#555555]">
+          選択件数: <span className="font-semibold text-[#222222]">{selectedCandidates.length}</span>
+          <span className="ml-3">合計: <span className="font-semibold text-[#222222]">{formatYen(String(selectedAmount))}</span></span>
+          </p>
+          {submitError ? (
+            <p className="mt-1 text-sm font-medium text-[#B42318]">{submitError}</p>
+          ) : null}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => void submitDelivery()}
+          disabled={selectedCandidates.length === 0 || !dateFilter || isSubmitting}
+          className={`rounded-lg px-6 py-2 text-sm font-bold text-white transition-colors duration-200 ease-[ease] ${
+            selectedCandidates.length === 0 || !dateFilter || isSubmitting
+              ? "cursor-not-allowed bg-[#E2E2E2] text-[#7C7C7C]"
+              : "bg-[#F5A200] hover:bg-[#E09700]"
+          }`}
+        >
+          {isSubmitting ? "納品確定中..." : "納品確定"}
+        </button>
       </div>
     </section>
   );
@@ -1024,6 +1643,10 @@ export default function ModalDisplayArea({ activeId }: ModalDisplayAreaProps) {
 
   if (activeId === "work") {
     return <WorkInputModal />;
+  }
+
+  if (activeId === "delivery") {
+    return <DeliveryCandidatesModal />;
   }
 
   return <DashboardModal />;

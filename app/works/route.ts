@@ -1,7 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function formatDate(date: Date, separator = "-") {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -30,29 +28,16 @@ function formatToothNumber(toothNumber: string) {
   return `${jaw} ${side} ${isDeciduous ? deciduousTooth ?? position : position}`;
 }
 
-export async function GET(request: NextRequest) {
-  const requestedDate = request.nextUrl.searchParams.get("date") ?? formatDate(new Date());
-
-  if (!DATE_PATTERN.test(requestedDate)) {
-    return NextResponse.json(
-      { error: "date must be YYYY-MM-DD" },
-      { status: 400 }
-    );
-  }
-
+export async function GET() {
   try {
-    const allOrders = await prisma.orders.findMany({
+    const orders = await prisma.orders.findMany({
       where: {
-        delivery_date: {
-          not: null,
+        work_status: {
+          in: ["pending", "in_progress"],
         },
       },
       orderBy: [{ delivery_date: "asc" }, { id: "asc" }],
     });
-    const orders = allOrders.filter(
-      (order) =>
-        order.delivery_date !== null && formatDate(order.delivery_date) === requestedDate
-    );
 
     if (orders.length === 0) {
       return NextResponse.json([]);
@@ -143,7 +128,9 @@ export async function GET(request: NextRequest) {
         clinic: customerNames.get(order.customer_id) ?? "未登録",
         patient: patientNames.get(order.patient_id) ?? "未登録",
         workType: [...new Set(workTypes)].join("、") || "未登録",
-        deliveryDate: formatDate(order.delivery_date as Date, "/"),
+        deliveryDate: order.delivery_date
+          ? formatDate(order.delivery_date, "/")
+          : "未設定",
         tooth: teeth.join("、") || "未登録",
         memo: order.remarks ?? "",
         workStatus: order.work_status,

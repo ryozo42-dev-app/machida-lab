@@ -43,7 +43,7 @@ model deliveries {
 model delivery_items {
   id            Int         @id @default(autoincrement())
   delivery_id   Int
-  order_item_id Int
+  order_item_id Int         @unique
   quantity      Int
   unit_price    Decimal     @db.Decimal(10, 2)
   amount        Decimal     @db.Decimal(12, 2)
