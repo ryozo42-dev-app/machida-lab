@@ -33,6 +33,9 @@ type DeliveryPdfData = {
   customer_name: string;
   delivery_date: string;
   total_amount: string;
+  tax_rate: Prisma.Decimal | null;
+  tax_amount: Prisma.Decimal | null;
+  total_amount_including_tax: Prisma.Decimal | null;
   items: DeliveryPdfItem[];
 };
 
@@ -68,6 +71,14 @@ function formatYen(value: Prisma.Decimal | null) {
     currency: "JPY",
     maximumFractionDigits: 0,
   }).format(Number(value));
+}
+
+function formatPercent(value: Prisma.Decimal | null) {
+  if (value === null) {
+    return "-";
+  }
+
+  return `${value.toString()}%`;
 }
 
 function escapeHtml(value: string) {
@@ -127,6 +138,9 @@ async function fetchDeliveryPdfData(deliveryId: number): Promise<DeliveryPdfData
       customer_id: true,
       delivery_date: true,
       total_amount: true,
+      tax_rate: true,
+      tax_amount: true,
+      total_amount_including_tax: true,
       delivery_items: {
         orderBy: { id: "asc" },
         select: {
@@ -286,6 +300,9 @@ async function fetchDeliveryPdfData(deliveryId: number): Promise<DeliveryPdfData
     customer_name: customer?.name ?? "未登録",
     delivery_date: formatDate(delivery.delivery_date, "-"),
     total_amount: formatYen(totalAmount),
+    tax_rate: delivery.tax_rate,
+    tax_amount: delivery.tax_amount,
+    total_amount_including_tax: delivery.total_amount_including_tax,
     items,
   };
 }
@@ -306,6 +323,43 @@ function createDeliveryHtml(data: DeliveryPdfData) {
       `
     )
     .join("");
+
+  const hasTaxSummary =
+    data.tax_rate !== null &&
+    data.tax_amount !== null &&
+    data.total_amount_including_tax !== null;
+  const totalHtml = hasTaxSummary
+    ? (() => {
+        const taxRate = data.tax_rate;
+        const taxAmount = data.tax_amount;
+        const totalAmountIncludingTax = data.total_amount_including_tax;
+
+        return `
+        <div class="total-row">
+          <span>合計金額（税抜）</span>
+          <span>${escapeHtml(data.total_amount)}</span>
+        </div>
+        <div class="total-row">
+          <span>税率</span>
+          <span>${escapeHtml(formatPercent(taxRate))}</span>
+        </div>
+        <div class="total-row">
+          <span>消費税額</span>
+          <span>${escapeHtml(formatYen(taxAmount))}</span>
+        </div>
+        <div class="total-divider"></div>
+        <div class="total-row total-row-grand">
+          <span>合計金額（税込）</span>
+          <span>${escapeHtml(formatYen(totalAmountIncludingTax))}</span>
+        </div>
+      `;
+      })()
+    : `
+        <div class="total-row total-row-grand">
+          <span>合計金額</span>
+          <span>${escapeHtml(data.total_amount)}</span>
+        </div>
+      `;
 
   return `<!doctype html>
 <html lang="ja">
@@ -469,13 +523,39 @@ body {
   width: 100%;
   display: flex;
   justify-content: flex-end;
-  align-items: center;
-  gap: 18px;
+  align-items: flex-start;
   margin-top: 18px;
   font-size: 12px;
 }
 
-.total strong {
+.total-panel {
+  min-width: 250px;
+}
+
+.total-row {
+  display: grid;
+  grid-template-columns: auto minmax(110px, auto);
+  column-gap: 18px;
+  align-items: baseline;
+  justify-content: end;
+  margin-top: 6px;
+}
+
+.total-row:first-child {
+  margin-top: 0;
+}
+
+.total-row span:last-child {
+  text-align: right;
+}
+
+.total-divider {
+  border-top: 1px solid #222222;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+
+.total-row-grand {
   font-size: 16px;
   font-weight: 700;
 }
@@ -504,7 +584,7 @@ body {
           <div class="lab-name">町田歯科技工所</div>
           <div>〒547-0034</div>
           <div>大阪府大阪市平野区背戸口2-1-18</div>
-          <div>TEL：06-6701-0563</div>
+          <div>TEL/FAX：06-7504-6229</div>
         </section>
 
       </header>
@@ -532,8 +612,9 @@ body {
       </table>
 
       <div class="total">
-        <span>合計金額</span>
-        <strong>${escapeHtml(data.total_amount)}</strong>
+        <div class="total-panel">
+          ${totalHtml}
+        </div>
       </div>
 
     </main>

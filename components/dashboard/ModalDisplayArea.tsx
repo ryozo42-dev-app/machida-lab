@@ -63,10 +63,13 @@ type PatientOption = {
   patient_name: string;
   patient_kana: string | null;
 };
-type InsuranceItemOption = {
+
+type WorkItemType = "insurance" | "private";
+
+type WorkItemOption = {
   id: number;
-  category: string;
   item_name: string;
+  type: WorkItemType;
 };
 
 const permanentRight = ["8", "7", "6", "5", "4", "3", "2", "1"];
@@ -189,7 +192,7 @@ function DashboardModal() {
       <div className="h-[14px] w-full rounded-t-[20px] bg-[#F5A200]" aria-hidden="true" />
 
       <div className="mt-3 flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
+              <div className="mb-2 flex items-start gap-3">
           <span className="mt-1 h-10 w-[5px] rounded-full bg-[#F5A200]" aria-hidden="true" />
           <div>
             <h2 className="text-3xl font-bold text-[#222222]">ダッシュボード</h2>
@@ -334,10 +337,13 @@ function OrderEntryModal() {
   const [patientQuery, setPatientQuery] = useState("");
   const [patientKana, setPatientKana] = useState("");
   const [isPatientCreating, setIsPatientCreating] = useState(false);
-  const [insuranceItems, setInsuranceItems] = useState<InsuranceItemOption[]>([]);
-  const [insuranceItemId, setInsuranceItemId] = useState<number | null>(null);
-  const [isInsuranceItemsLoading, setIsInsuranceItemsLoading] = useState(true);
-  const [insuranceItemsError, setInsuranceItemsError] = useState("");
+  const [workItemType, setWorkItemType] = useState<WorkItemType>("insurance");
+  const [workItemQuery, setWorkItemQuery] = useState("");
+  const [workItemCandidates, setWorkItemCandidates] = useState<WorkItemOption[]>([]);
+  const [selectedWorkItem, setSelectedWorkItem] = useState<WorkItemOption | null>(null);
+  const [isWorkItemLoading, setIsWorkItemLoading] = useState(false);
+  const [workItemError, setWorkItemError] = useState("");
+  const [quantity, setQuantity] = useState("1");
   const [deliveryDate, setDeliveryDate] = useState("");
   const [toothType, setToothType] = useState<ToothSetType>("permanent");
   const [selectedTeeth, setSelectedTeeth] = useState<Set<string>>(new Set());
@@ -394,45 +400,62 @@ function OrderEntryModal() {
   }, []);
 
   useEffect(() => {
+    const keyword = workItemQuery.trim();
+
+    if (
+      customerId === null ||
+      keyword.length === 0 ||
+      selectedWorkItem?.item_name === workItemQuery
+    ) {
+      return;
+    }
+
     const controller = new AbortController();
+    const timerId = setTimeout(() => {
+      const loadWorkItems = async () => {
+        try {
+          setIsWorkItemLoading(true);
+          setWorkItemError("");
 
-    const loadInsuranceItems = async () => {
-      try {
-        const response = await fetch("/api/insurance-items", {
-          signal: controller.signal,
-        });
+          const params = new URLSearchParams({
+            customer_id: String(customerId),
+            type: workItemType,
+            q: keyword,
+          });
+          const response = await fetch(`/api/work-items?${params.toString()}`, {
+            signal: controller.signal,
+          });
 
-        if (!response.ok) {
-          throw new Error("Failed to fetch insurance items");
+          if (!response.ok) {
+            throw new Error("Failed to fetch work items");
+          }
+
+          const data: WorkItemOption[] = await response.json();
+          setWorkItemCandidates(data);
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+
+          console.error(error);
+          setWorkItemCandidates([]);
+          setWorkItemError("作業内容の検索に失敗しました");
+        } finally {
+          if (!controller.signal.aborted) {
+            setIsWorkItemLoading(false);
+          }
         }
+      };
 
-        const data: InsuranceItemOption[] = await response.json();
+      void loadWorkItems();
+    }, 250);
 
-        if (data.length === 0) {
-          setInsuranceItemsError("作業内容が登録されていません");
-          return;
-        }
-
-        setInsuranceItems(data);
-        setInsuranceItemId(data[0].id);
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-
-        console.error(error);
-        setInsuranceItemsError("作業内容の取得に失敗しました");
-      } finally {
-        if (!controller.signal.aborted) {
-          setIsInsuranceItemsLoading(false);
-        }
-      }
+    return () => {
+      controller.abort();
+      clearTimeout(timerId);
+      setIsWorkItemLoading(false);
     };
-
-    void loadInsuranceItems();
-
-    return () => controller.abort();
-  }, []);
+  }, [customerId, selectedWorkItem, workItemQuery, workItemType]);
 
   useEffect(() => {
     if (customerId === null) {
@@ -523,10 +546,21 @@ function OrderEntryModal() {
       return;
     }
 
-    if (insuranceItemId === null) {
+    if (selectedWorkItem === null) {
       alert("作業内容を選択してください");
       return;
     }
+
+      const parsedQuantity = Number(quantity);
+
+      if (
+        quantity.trim().length === 0 ||
+        !Number.isInteger(parsedQuantity) ||
+        parsedQuantity <= 0
+      ) {
+        alert("数量を1以上の整数で入力してください");
+        return;
+      }
 
     console.log("submit!!");
     alert("submit!!");
@@ -534,10 +568,15 @@ function OrderEntryModal() {
     const formData = new FormData();
     formData.append("customer_id", String(customerId));
     formData.append("patient_id", String(patientId));
-    formData.append("insurance_item_id", String(insuranceItemId));
+    if (selectedWorkItem.type === "insurance") {
+      formData.append("insurance_item_id", String(selectedWorkItem.id));
+    } else {
+      formData.append("private_item_id", String(selectedWorkItem.id));
+    }
+    formData.append("quantity", String(parsedQuantity));
     formData.append("order_date", new Date().toISOString());
     formData.append("delivery_date", deliveryDate || new Date().toISOString());
-    formData.append("insurance_type", "保険");
+    formData.append("insurance_type", selectedWorkItem.type === "insurance" ? "保険" : "自費");
     formData.append("remarks", note);
 
     Array.from(selectedTeeth)
@@ -669,7 +708,7 @@ function OrderEntryModal() {
           <div className="flex h-full min-h-0 flex-col gap-1">
             <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] gap-4">
             <div className="flex min-h-0 flex-col gap-1">
-          <div className="flex h-10 items-center gap-3">
+            <div className="mt-1 flex h-10 items-center gap-3">
             <label className="shrink-0 text-xs font-semibold text-[#333333]">歯科医院</label>
             <div className="flex min-w-0 flex-1 gap-2">
               <select
@@ -682,6 +721,10 @@ function OrderEntryModal() {
                   setIsPatientSelected(false);
                   setPatientQuery("");
                   setPatientKana("");
+                  setSelectedWorkItem(null);
+                  setWorkItemQuery("");
+                  setWorkItemCandidates([]);
+                  setWorkItemError("");
                 }}
                 disabled={isCustomersLoading || Boolean(customersError)}
                 className={`h-10 w-full rounded-lg border bg-white px-3 text-sm font-medium outline-none transition-colors focus:border-[#F0B132] disabled:opacity-100 ${
@@ -713,31 +756,123 @@ function OrderEntryModal() {
             </div>
           </div>
 
-          <div className="flex h-10 items-center gap-3">
-            <label className="shrink-0 text-xs font-semibold text-[#333333]">作業内容</label>
-            <select
-              name="work_type"
-              value={insuranceItemId ?? ""}
-              onChange={(event) => setInsuranceItemId(Number(event.target.value))}
-              disabled={isInsuranceItemsLoading || Boolean(insuranceItemsError)}
-              className={`h-10 w-full rounded-lg border bg-white px-3 text-sm font-medium outline-none transition-colors focus:border-[#F0B132] disabled:opacity-100 ${
-                insuranceItemsError
-                  ? "border-[#D75A4A] text-[#B42318]"
-                  : "border-[#E2E2E2] text-[#333333]"
-              }`}
-            >
-              {isInsuranceItemsLoading || insuranceItemsError ? (
-                <option value="">
-                  {isInsuranceItemsLoading ? "読み込み中..." : insuranceItemsError}
-                </option>
+          <div className="flex items-start gap-3">
+            <label className="shrink-0 pt-2 text-xs font-semibold text-[#333333]">作業内容</label>
+              <div className="w-full flex flex-col gap-1">
+              <div className="flex h-10 items-center gap-5 rounded-lg border border-[#E2E2E2] bg-white px-3">
+                <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#444444]">
+                  <input
+                    type="radio"
+                    name="work_item_type"
+                    checked={workItemType === "insurance"}
+                    onChange={() => {
+                      setWorkItemType("insurance");
+                      setSelectedWorkItem(null);
+                      setWorkItemCandidates([]);
+                      setWorkItemError("");
+                    }}
+                    className="h-3.5 w-3.5 accent-[#F5A200]"
+                  />
+                  保険
+                </label>
+                <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#444444]">
+                  <input
+                    type="radio"
+                    name="work_item_type"
+                    checked={workItemType === "private"}
+                    onChange={() => {
+                      setWorkItemType("private");
+                      setSelectedWorkItem(null);
+                      setWorkItemCandidates([]);
+                      setWorkItemError("");
+                    }}
+                    className="h-3.5 w-3.5 accent-[#F5A200]"
+                  />
+                  自費
+                </label>
+              </div>
+
+              <input
+                name="work_item_query"
+                value={workItemQuery}
+                onChange={(event) => {
+                  setWorkItemQuery(event.target.value);
+                  setSelectedWorkItem(null);
+                  setWorkItemError("");
+                }}
+                disabled={customerId === null}
+                placeholder={customerId === null ? "歯科医院を先に選択してください" : "作業内容を入力"}
+                className="mt-2 h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132] disabled:bg-[#FAFAFA] disabled:text-[#999999]"
+              />
+
+              {workItemError ? (
+                <p className="mt-1 text-xs font-medium text-[#B42318]">{workItemError}</p>
               ) : null}
-              {insuranceItems.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.item_name}
-                </option>
-              ))}
-            </select>
+
+              {customerId !== null && workItemQuery.trim().length > 0 && !selectedWorkItem ? (
+                <div className="mt-1 max-h-[72px] w-full overflow-y-auto rounded-xl border border-[#ECECEC] bg-white p-1">
+                  {isWorkItemLoading ? (
+                    <p className="px-3 py-1.5 text-xs text-[#666666]">検索中...</p>
+                  ) : workItemCandidates.length > 0 ? (
+                    workItemCandidates.map((item) => (
+                      <button
+                        key={`${item.type}-${item.id}`}
+                        type="button"
+                        onClick={() => {
+                          setSelectedWorkItem(item);
+                          setWorkItemQuery(item.item_name);
+                          setWorkItemCandidates([]);
+                        }}
+                        className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[#333333] hover:bg-[#FFF8EA]"
+                      >
+                        {item.item_name}
+                      </button>
+                    ))
+                  ) : (
+                    <p className="px-3 py-1.5 text-xs text-[#666666]">候補が見つかりません</p>
+                  )}
+                </div>
+              ) : null}
+            </div>
           </div>
+
+              <div className="mb-2 flex items-center gap-3">
+                <label className="shrink-0 text-xs font-semibold text-[#333333]">数量</label>
+                <div className="w-28">
+                  <input
+                    type="text"
+                    list="quantity-options"
+                    inputMode="numeric"
+                    value={quantity}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+
+                      if (nextValue === "" || /^(?:[1-9]\d*)$/.test(nextValue)) {
+                        setQuantity(nextValue);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (quantity.trim().length === 0) {
+                        setQuantity("1");
+                      }
+                    }}
+                    className="h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
+                    aria-label="数量"
+                  />
+                  <datalist id="quantity-options">
+                    <option value="1" />
+                    <option value="2" />
+                    <option value="3" />
+                    <option value="4" />
+                    <option value="5" />
+                    <option value="6" />
+                    <option value="7" />
+                    <option value="8" />
+                    <option value="9" />
+                    <option value="10" />
+                  </datalist>
+                </div>
+                </div>
 
           <div className="flex h-10 items-center gap-3">
               <label className="shrink-0 text-xs font-semibold text-[#333333]">納品予定日</label>
@@ -929,8 +1064,21 @@ function OrderEntryModal() {
         <div className="mt-3 flex shrink-0 items-center justify-end gap-2 border-t border-[#ECECEC] bg-white pt-3">
           <input type="hidden" name="customer_id" value={customerId ?? ""} />
           <input type="hidden" name="patient_id" value={patientId ?? ""} />
-          <input type="hidden" name="insurance_item_id" value={insuranceItemId ?? ""} />
-          <input type="hidden" name="insurance_type" value="保険" />
+          <input
+            type="hidden"
+            name="insurance_item_id"
+            value={selectedWorkItem?.type === "insurance" ? String(selectedWorkItem.id) : ""}
+          />
+          <input
+            type="hidden"
+            name="private_item_id"
+            value={selectedWorkItem?.type === "private" ? String(selectedWorkItem.id) : ""}
+          />
+          <input
+            type="hidden"
+            name="insurance_type"
+            value={selectedWorkItem?.type === "private" ? "自費" : "保険"}
+          />
           <button
             type="button"
             onClick={() => console.log("[Order] cancel clicked")}

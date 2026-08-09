@@ -36,8 +36,22 @@ model deliveries {
   customer_id    Int
   delivery_date  DateTime         @db.Date
   total_amount   Decimal?         @db.Decimal(12, 2)
+  tax_rate       Decimal?         @db.Decimal(5, 2)
+  tax_amount     Decimal?         @db.Decimal(12, 2)
+  total_amount_including_tax Decimal? @db.Decimal(12, 2)
   created_at     DateTime?        @default(now()) @db.Timestamp(6)
   delivery_items delivery_items[]
+}
+
+model TaxRate {
+  id             Int      @id @default(autoincrement())
+  tax_rate       Decimal  @db.Decimal(5, 2)
+  effective_from DateTime
+  created_at     DateTime @default(now()) @db.Timestamp(6)
+  updated_at     DateTime @updatedAt
+
+  @@index([effective_from])
+  @@map("tax_rates")
 }
 
 model delivery_items {

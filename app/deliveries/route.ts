@@ -379,6 +379,30 @@ export async function POST(request: NextRequest) {
           (total, item) => total.add(item.amount),
           new Prisma.Decimal(0)
         );
+        const applicableTaxRate = await transaction.taxRate.findFirst({
+          where: {
+            effective_from: {
+              lte: deliveryDate,
+            },
+          },
+          orderBy: {
+            effective_from: "desc",
+          },
+          select: {
+            tax_rate: true,
+          },
+        });
+
+        if (!applicableTaxRate) {
+          throw new DeliveryRequestError("納品日に適用可能な税率設定がありません", 409);
+        }
+
+        const taxRate = applicableTaxRate.tax_rate;
+        const taxAmount = totalAmount
+          .mul(taxRate)
+          .div(100)
+          .toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP);
+        const totalAmountIncludingTax = totalAmount.add(taxAmount);
 
         const existingDeliveryNos = await transaction.deliveries.findMany({
           where: {
@@ -416,6 +440,9 @@ export async function POST(request: NextRequest) {
             customer_id: customerId,
             delivery_date: deliveryDate,
             total_amount: totalAmount,
+            tax_rate: taxRate,
+            tax_amount: taxAmount,
+            total_amount_including_tax: totalAmountIncludingTax,
             delivery_items: {
               create: resolvedItems,
             },

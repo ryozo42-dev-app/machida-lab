@@ -9,6 +9,19 @@ export const runtime = "nodejs";
 const MAX_PDF_SIZE = 10 * 1024 * 1024;
 const orderFilesDirectory = path.join(process.cwd(), "storage", "order-files");
 
+function parseOptionalPositiveInt(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
 function formatOrderNoDate(date: Date) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Tokyo",
@@ -34,7 +47,9 @@ async function parseOrderBody(req: NextRequest) {
   return {
     customer_id: Number(formData.get("customer_id")),
     patient_id: Number(formData.get("patient_id")),
-    insurance_item_id: Number(formData.get("insurance_item_id")),
+    insurance_item_id: formData.get("insurance_item_id"),
+    private_item_id: formData.get("private_item_id"),
+    quantity: formData.get("quantity"),
     tooth_numbers: formData.getAll("tooth_numbers").map(String),
     order_date: formData.get("order_date") || new Date().toISOString(),
     delivery_date: formData.get("delivery_date") || new Date().toISOString(),
@@ -69,7 +84,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const insuranceItemId = Number(body.insurance_item_id);
+    const insuranceItemId = parseOptionalPositiveInt(body.insurance_item_id);
+    const privateItemId = parseOptionalPositiveInt(body.private_item_id);
+    const quantity = parseOptionalPositiveInt(body.quantity) ?? 1;
     const rawToothNumbers: unknown[] = Array.isArray(body.tooth_numbers)
       ? body.tooth_numbers
       : [];
@@ -114,9 +131,28 @@ export async function POST(req: NextRequest) {
       await writeFile(temporaryFilePath, pdfBuffer, { flag: "wx" });
     }
 
-    if (!Number.isInteger(insuranceItemId) || insuranceItemId <= 0) {
+    const hasInsuranceItem = insuranceItemId !== null;
+    const hasPrivateItem = privateItemId !== null;
+
+    if (hasInsuranceItem === hasPrivateItem) {
       return NextResponse.json(
-        { error: "insurance_item_id is required" },
+        {
+          error: "Exactly one of insurance_item_id or private_item_id must be specified",
+        },
+        { status: 400 }
+      );
+    }
+
+    const selectedInsuranceType = hasInsuranceItem ? "保険" : "自費";
+
+    if (
+      body.insurance_type !== undefined &&
+      body.insurance_type !== null &&
+      String(body.insurance_type).trim().length > 0 &&
+      String(body.insurance_type) !== selectedInsuranceType
+    ) {
+      return NextResponse.json(
+        { error: "insurance_type does not match selected work item type" },
         { status: 400 }
       );
     }
@@ -128,20 +164,32 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const insuranceItem = await prisma.insurance_items.findUnique({
-      where: {
-        id: insuranceItemId,
-      },
-      select: {
-        id: true,
-      },
-    });
+    if (hasInsuranceItem) {
+      const insuranceItem = await prisma.insurance_items.findUnique({
+        where: { id: insuranceItemId },
+        select: { id: true },
+      });
 
-    if (!insuranceItem) {
-      return NextResponse.json(
-        { error: "Invalid insurance_item_id" },
-        { status: 400 }
-      );
+      if (!insuranceItem) {
+        return NextResponse.json(
+          { error: "Invalid insurance_item_id" },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (hasPrivateItem) {
+      const privateItem = await prisma.private_items.findUnique({
+        where: { id: privateItemId },
+        select: { id: true },
+      });
+
+      if (!privateItem) {
+        return NextResponse.json(
+          { error: "Invalid private_item_id" },
+          { status: 400 }
+        );
+      }
     }
 
     const order = await prisma.$transaction(async (transaction) => {
@@ -162,7 +210,7 @@ export async function POST(req: NextRequest) {
           patient_id: body.patient_id,
           order_date: orderDate,
           delivery_date: body.delivery_date ? new Date(body.delivery_date) : null,
-          insurance_type: body.insurance_type,
+          insurance_type: selectedInsuranceType,
           remarks: body.remarks,
         },
       });
@@ -170,8 +218,9 @@ export async function POST(req: NextRequest) {
       await transaction.order_items.create({
         data: {
           order_id: createdOrder.id,
-          insurance_item_id: insuranceItem.id,
-          quantity: 1,
+          insurance_item_id: hasInsuranceItem ? insuranceItemId : null,
+          private_item_id: hasPrivateItem ? privateItemId : null,
+          quantity,
         },
       });
 
@@ -198,8 +247,6 @@ export async function POST(req: NextRequest) {
       }
 
       return createdOrder;
-    }, {
-      isolationLevel: "Serializable",
     });
 
     return NextResponse.json(order);
