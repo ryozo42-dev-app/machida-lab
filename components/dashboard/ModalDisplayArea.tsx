@@ -343,7 +343,6 @@ function OrderEntryModal() {
   const [selectedWorkItem, setSelectedWorkItem] = useState<WorkItemOption | null>(null);
   const [isWorkItemLoading, setIsWorkItemLoading] = useState(false);
   const [workItemError, setWorkItemError] = useState("");
-  const [quantity, setQuantity] = useState("1");
   const [deliveryDate, setDeliveryDate] = useState("");
   const [toothType, setToothType] = useState<ToothSetType>("permanent");
   const [selectedTeeth, setSelectedTeeth] = useState<Set<string>>(new Set());
@@ -551,17 +550,6 @@ function OrderEntryModal() {
       return;
     }
 
-      const parsedQuantity = Number(quantity);
-
-      if (
-        quantity.trim().length === 0 ||
-        !Number.isInteger(parsedQuantity) ||
-        parsedQuantity <= 0
-      ) {
-        alert("数量を1以上の整数で入力してください");
-        return;
-      }
-
     console.log("submit!!");
     alert("submit!!");
 
@@ -573,7 +561,7 @@ function OrderEntryModal() {
     } else {
       formData.append("private_item_id", String(selectedWorkItem.id));
     }
-    formData.append("quantity", String(parsedQuantity));
+    formData.append("quantity", "1");
     formData.append("order_date", new Date().toISOString());
     formData.append("delivery_date", deliveryDate || new Date().toISOString());
     formData.append("insurance_type", selectedWorkItem.type === "insurance" ? "保険" : "自費");
@@ -835,44 +823,6 @@ function OrderEntryModal() {
               ) : null}
             </div>
           </div>
-
-              <div className="mb-2 flex items-center gap-3">
-                <label className="shrink-0 text-xs font-semibold text-[#333333]">数量</label>
-                <div className="w-28">
-                  <input
-                    type="text"
-                    list="quantity-options"
-                    inputMode="numeric"
-                    value={quantity}
-                    onChange={(event) => {
-                      const nextValue = event.target.value;
-
-                      if (nextValue === "" || /^(?:[1-9]\d*)$/.test(nextValue)) {
-                        setQuantity(nextValue);
-                      }
-                    }}
-                    onBlur={() => {
-                      if (quantity.trim().length === 0) {
-                        setQuantity("1");
-                      }
-                    }}
-                    className="h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
-                    aria-label="数量"
-                  />
-                  <datalist id="quantity-options">
-                    <option value="1" />
-                    <option value="2" />
-                    <option value="3" />
-                    <option value="4" />
-                    <option value="5" />
-                    <option value="6" />
-                    <option value="7" />
-                    <option value="8" />
-                    <option value="9" />
-                    <option value="10" />
-                  </datalist>
-                </div>
-                </div>
 
           <div className="flex h-10 items-center gap-3">
               <label className="shrink-0 text-xs font-semibold text-[#333333]">納品予定日</label>

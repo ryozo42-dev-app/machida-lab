@@ -86,7 +86,6 @@ export async function POST(req: NextRequest) {
 
     const insuranceItemId = parseOptionalPositiveInt(body.insurance_item_id);
     const privateItemId = parseOptionalPositiveInt(body.private_item_id);
-    const quantity = parseOptionalPositiveInt(body.quantity) ?? 1;
     const rawToothNumbers: unknown[] = Array.isArray(body.tooth_numbers)
       ? body.tooth_numbers
       : [];
@@ -220,7 +219,7 @@ export async function POST(req: NextRequest) {
           order_id: createdOrder.id,
           insurance_item_id: hasInsuranceItem ? insuranceItemId : null,
           private_item_id: hasPrivateItem ? privateItemId : null,
-          quantity,
+            quantity: 1,
         },
       });
 
