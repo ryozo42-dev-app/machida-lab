@@ -50,7 +50,7 @@ const dockItems: DockItem[] = [
 ];
 
 export default function DesktopWorkspace() {
-  const [activeId, setActiveId] = useState("order");
+  const [activeId, setActiveId] = useState("dashboard");
   const [previousId, setPreviousId] = useState<string | null>(null);
   const [transitionPhase, setTransitionPhase] = useState<"idle" | "fadeOut" | "fadeIn">("idle");
   const workspaceRef = useRef<HTMLElement>(null);
