@@ -598,7 +598,7 @@ body {
             <th>患者名</th>
             <th>受注No</th>
             <th>作業内容</th>
-            <th>歯番</th>
+            <th>歯式</th>
             <th>数量</th>
             <th>単価</th>
             <th>金額</th>
