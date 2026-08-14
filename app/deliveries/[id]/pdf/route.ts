@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import chromium from "@sparticuz/chromium-min";
 import puppeteer from "puppeteer-core";
 import { NextResponse } from "next/server";
@@ -308,6 +309,13 @@ async function fetchDeliveryPdfData(deliveryId: number): Promise<DeliveryPdfData
 }
 
 function createDeliveryHtml(data: DeliveryPdfData) {
+    const font400 = fs.readFileSync(
+    path.join(process.cwd(), "public/fonts/noto-sans-jp-japanese-400-normal.woff2")
+  ).toString("base64");
+
+  const font700 = fs.readFileSync(
+    path.join(process.cwd(), "public/fonts/noto-sans-jp-japanese-700-normal.woff2")
+  ).toString("base64");
   const itemsHtml = data.items
     .map(
       (item) => `
@@ -367,7 +375,20 @@ function createDeliveryHtml(data: DeliveryPdfData) {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <style>
-@page {
+@font-face {
+  font-family: "Noto Sans JP";
+  font-style: normal;
+  font-weight: 400;
+  src: url(data:font/woff2;base64,${font400}) format("woff2");
+}
+
+@font-face {
+  font-family: "Noto Sans JP";
+  font-style: normal;
+  font-weight: 700;
+  src: url(data:font/woff2;base64,${font700}) format("woff2");
+}
+    @page {
   size: A4 portrait;
   margin: 0;
 }
