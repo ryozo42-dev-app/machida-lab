@@ -13,7 +13,7 @@ export type DockItem = {
 type DockLauncherProps = {
   items: DockItem[];
   activeId: string;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, launcherRect: DOMRect) => void;
 };
 
 export default function DockLauncher({ items, activeId, onSelect }: DockLauncherProps) {
@@ -64,7 +64,7 @@ export default function DockLauncher({ items, activeId, onSelect }: DockLauncher
               <li key={item.id} className="relative flex h-[5.5rem] w-[5.5rem] shrink-0 items-center justify-center overflow-visible">
                 <button
                   type="button"
-                  onClick={() => onSelect(item.id)}
+                  onClick={(event) => onSelect(item.id, event.currentTarget.getBoundingClientRect())}
                   onMouseEnter={() => setHoveredId(item.id)}
                   onFocus={() => setHoveredId(item.id)}
                   onBlur={() => setHoveredId(null)}
