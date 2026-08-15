@@ -46,6 +46,7 @@ export async function GET() {
     const orderIds = orders.map((order) => order.id);
     const customerIds = [...new Set(orders.map((order) => order.customer_id))];
     const patientIds = [...new Set(orders.map((order) => order.patient_id))];
+
     const [customers, patients, orderItems, orderTeeth, orderFiles] =
       await Promise.all([
         prisma.customers.findMany({
@@ -69,6 +70,7 @@ export async function GET() {
           orderBy: { id: "asc" },
         }),
       ]);
+
     const insuranceItemIds = [
       ...new Set(
         orderItems.flatMap((item) =>
@@ -76,6 +78,7 @@ export async function GET() {
         )
       ),
     ];
+
     const privateItemIds = [
       ...new Set(
         orderItems.flatMap((item) =>
@@ -83,6 +86,7 @@ export async function GET() {
         )
       ),
     ];
+
     const [insuranceItems, privateItems] = await Promise.all([
       prisma.insurance_items.findMany({
         where: { id: { in: insuranceItemIds } },
@@ -93,19 +97,26 @@ export async function GET() {
         select: { id: true, item_name: true },
       }),
     ]);
-    const customerNames = new Map(customers.map((customer) => [customer.id, customer.name]));
+
+    const customerNames = new Map(
+      customers.map((customer) => [customer.id, customer.name])
+    );
+
     const patientNames = new Map(
       patients.map((patient) => [patient.id, patient.patient_name])
     );
+
     const insuranceItemNames = new Map(
       insuranceItems.map((item) => [item.id, item.item_name])
     );
+
     const privateItemNames = new Map(
       privateItems.map((item) => [item.id, item.item_name])
     );
 
     const records = orders.map((order) => {
       const items = orderItems.filter((item) => item.order_id === order.id);
+
       const workTypes = items.flatMap((item) => {
         if (item.insurance_item_id !== null) {
           return insuranceItemNames.get(item.insurance_item_id) ?? [];
@@ -117,14 +128,17 @@ export async function GET() {
 
         return [];
       });
+
       const teeth = orderTeeth
         .filter((tooth) => tooth.order_id === order.id)
         .map((tooth) => formatToothNumber(tooth.tooth_no));
+
       const pdf = orderFiles.find((file) => file.order_id === order.id);
 
       return {
         id: order.id,
         orderNo: order.order_no ?? "",
+        customerId: order.customer_id,
         clinic: customerNames.get(order.customer_id) ?? "未登録",
         patient: patientNames.get(order.patient_id) ?? "未登録",
         workType: [...new Set(workTypes)].join("、") || "未登録",

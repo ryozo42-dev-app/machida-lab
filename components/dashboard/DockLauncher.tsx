@@ -100,7 +100,7 @@ export default function DockLauncher({ items, activeId, onSelect }: DockLauncher
                   className={`pointer-events-none absolute -bottom-0.5 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full transition-opacity duration-200 ${
                     isSelected ? "opacity-100" : "opacity-0"
                   }`}
-                  style={{ backgroundColor: item.indicatorColor ?? "#F5A200" }}
+                  style={{ backgroundColor: item.indicatorColor ?? "#FFFF00" }}
                   aria-hidden="true"
                 />
               </li>

@@ -2,7 +2,7 @@ import Image from "next/image";
 
 export default function Header() {
   return (
-    <header className="bg-white border-b-4 border-yellow-500 shadow-md">
+    <header className="bg-white border-b-4 border-[#FFFF00] shadow-md">
       <div className="mx-auto flex h-20 items-center justify-between px-8">
 
         {/* 左側：ロゴ＋タイトル */}
@@ -22,7 +22,9 @@ export default function Header() {
               Machida
             </span>
 
-            <span className="text-4xl font-extrabold text-yellow-600">
+            <span
+              className="text-4xl font-extrabold text-[#FFFF00] drop-shadow-[2px_2px_2px_rgba(0,0,0,0.45)]"
+            >
               Lab
             </span>
 
@@ -41,7 +43,7 @@ export default function Header() {
             Dental Laboratory
           </p>
 
-          <p className="text-lg font-semibold text-yellow-600">
+          <p className="text-lg font-semibold text-[#FFFF00] drop-shadow-[1px_1px_2px_rgba(0,0,0,0.35)]">
             Version 1.0
           </p>
 

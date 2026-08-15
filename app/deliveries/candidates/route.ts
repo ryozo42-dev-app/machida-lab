@@ -109,8 +109,8 @@ export async function GET(request: NextRequest) {
             in: orderIds,
           },
           delivery_items: {
-            none: {},
-          },
+            is: null,
+},
         },
         orderBy: [{ order_id: "asc" }, { id: "asc" }],
       }),
