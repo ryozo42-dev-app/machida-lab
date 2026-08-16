@@ -23,7 +23,7 @@ const dashboardCards: DashboardCard[] = [
     title: "明日の納品予定",
     count: "8件",
     iconSrc: "/icons/delivery.svg",
-    accentClassName: "bg-[#FFFF00]",
+    accentClassName: "bg-[#fff362]",
     iconBadgeClassName: "bg-[#FFF8E1]",
   },
   {
@@ -31,7 +31,7 @@ const dashboardCards: DashboardCard[] = [
     title: "未完了作業",
     count: "3件",
     iconSrc: "/icons/work.svg",
-    accentClassName: "bg-[#FFFF00]",
+    accentClassName: "bg-[#fff362]",
     iconBadgeClassName: "bg-[#FFFFE0]",
   },
   {
@@ -39,7 +39,7 @@ const dashboardCards: DashboardCard[] = [
     title: "納期超過",
     count: "1件",
     iconSrc: "/icons/overdue-warning.svg",
-    accentClassName: "bg-[#FFFF00]",
+    accentClassName: "bg-[#fff362]",
     iconBadgeClassName: "bg-[#FFFFE0]",
   },
   {
@@ -47,7 +47,7 @@ const dashboardCards: DashboardCard[] = [
     title: "今月受注件数",
     count: "126件",
     iconSrc: "/icons/order.svg",
-    accentClassName: "bg-[#FFFF00]",
+    accentClassName: "bg-[#fff362]",
     iconBadgeClassName: "bg-[#FFFFE0]",
   },
 ];
@@ -191,11 +191,11 @@ function DashboardModal() {
       className="flex h-full min-h-[340px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-7 sm:p-9"
       aria-label="ダッシュボード"
     >
-      <div className="h-[14px] w-full rounded-t-[20px] bg-[#FFFF00]" aria-hidden="true" />
+      <div className="h-[14px] w-full rounded-t-[20px] bg-[#fff362]" aria-hidden="true" />
 
       <div className="mt-3 flex items-start justify-between gap-4">
               <div className="mb-2 flex items-start gap-3">
-          <span className="mt-1 h-10 w-[5px] rounded-full bg-[#FFFF00]" aria-hidden="true" />
+          <span className="mt-1 h-10 w-[5px] rounded-full bg-[#fff362]" aria-hidden="true" />
           <div>
             <h2 className="text-3xl font-bold text-[#222222]">ダッシュボード</h2>
             <p className="mt-2 text-sm text-[#666666]">現在の業務状況</p>
@@ -288,7 +288,7 @@ function ToothRow({
                 onClick={() => onToggle(id)}
                 className={`h-6 w-5 shrink-0 rounded-md border p-0 text-[10px] font-semibold transition-[background-color,border-color] duration-200 ease-[ease] ${
                   isSelected
-                    ? "border-[#FFFF00] bg-[#FFF8E1] text-[#8A6D1D]"
+                    ? "border-[#fff362] bg-[#FFF8E1] text-[#8A6D1D]"
                     : "border-[#E5E5E5] bg-white text-[#444444]"
                 }`}
               >
@@ -312,7 +312,7 @@ function ToothRow({
                 onClick={() => onToggle(id)}
                 className={`h-6 w-5 shrink-0 rounded-md border p-0 text-[10px] font-semibold transition-[background-color,border-color] duration-200 ease-[ease] ${
                   isSelected
-                    ? "border-[#FFFF00] bg-[#FFF8E1] text-[#8A6D1D]"
+                    ? "border-[#fff362] bg-[#FFF8E1] text-[#8A6D1D]"
                     : "border-[#E5E5E5] bg-white text-[#444444]"
                 }`}
               >
@@ -675,10 +675,10 @@ function OrderEntryModal() {
       className="flex h-full min-h-0 w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6"
       aria-label="受注入力"
     >
-      <div className="h-[14px] w-full rounded-t-[20px] bg-[#FFFF00]" aria-hidden="true" />
+      <div className="h-[14px] w-full rounded-t-[20px] bg-[#fff362]" aria-hidden="true" />
 
       <div className="mt-3 flex items-start gap-3">
-        <span className="mt-1 h-10 w-[5px] rounded-full bg-[#FFFF00]" aria-hidden="true" />
+        <span className="mt-1 h-10 w-[5px] rounded-full bg-[#fff362]" aria-hidden="true" />
         <div>
           <h2 className="text-2xl font-bold text-[#222222]">受注入力</h2>
           <p className="mt-1 text-xs text-[#666666]">新しい受注を登録します</p>
@@ -761,7 +761,7 @@ function OrderEntryModal() {
                       setWorkItemCandidates([]);
                       setWorkItemError("");
                     }}
-                    className="h-3.5 w-3.5 accent-[#FFFF00]"
+                    className="h-3.5 w-3.5 accent-[#fff362]"
                   />
                   保険
                 </label>
@@ -776,7 +776,7 @@ function OrderEntryModal() {
                       setWorkItemCandidates([]);
                       setWorkItemError("");
                     }}
-                    className="h-3.5 w-3.5 accent-[#FFFF00]"
+                    className="h-3.5 w-3.5 accent-[#fff362]"
                   />
                   自費
                 </label>
@@ -847,7 +847,7 @@ function OrderEntryModal() {
                   name="toothType"
                   checked={toothType === "permanent"}
                   onChange={() => setToothType("permanent")}
-                  className="h-3.5 w-3.5 accent-[#FFFF00]"
+                  className="h-3.5 w-3.5 accent-[#fff362]"
                 />
                 永久歯
               </label>
@@ -857,7 +857,7 @@ function OrderEntryModal() {
                   name="toothType"
                   checked={toothType === "deciduous"}
                   onChange={() => setToothType("deciduous")}
-                  className="h-3.5 w-3.5 accent-[#FFFF00]"
+                  className="h-3.5 w-3.5 accent-[#fff362]"
                 />
                 乳歯
               </label>
@@ -957,7 +957,7 @@ function OrderEntryModal() {
               onDragLeave={() => setIsDragActive(false)}
               onDrop={handleDrop}
               className={`flex min-h-[76px] flex-1 items-center rounded-[12px] border-2 border-dashed p-2 transition-colors ${
-                isDragActive ? "border-[#FFFF00] bg-[#FFF8EA]" : "border-[#E3E3E3] bg-[#FCFCFC]"
+                isDragActive ? "border-[#fff362] bg-[#FFF8EA]" : "border-[#E3E3E3] bg-[#FCFCFC]"
               }`}
             >
               <input
@@ -1041,7 +1041,7 @@ function OrderEntryModal() {
 
           <button
             type="submit"
-            className="rounded-lg bg-[#FFFF00] px-6 py-2 text-sm font-bold text-[#222222] transition-colors duration-200 ease-[ease] hover:bg-[#FFFF00]"
+            className="rounded-lg bg-[#fff362] px-6 py-2 text-sm font-bold text-[#222222] transition-colors duration-200 ease-[ease] hover:bg-[#fff362]"
           >
             受注登録
           </button>
@@ -1158,10 +1158,10 @@ function WorkInputModal() {
       className="flex h-full min-h-[340px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6"
       aria-label="作業時入力"
     >
-      <div className="h-[14px] w-full rounded-t-[20px] bg-[#FFFF00]" aria-hidden="true" />
+      <div className="h-[14px] w-full rounded-t-[20px] bg-[#fff362]" aria-hidden="true" />
 
       <div className="mt-3 flex items-start gap-3">
-        <span className="mt-1 h-10 w-[5px] rounded-full bg-[#FFFF00]" aria-hidden="true" />
+        <span className="mt-1 h-10 w-[5px] rounded-full bg-[#fff362]" aria-hidden="true" />
         <div>
           <h2 className="text-2xl font-bold text-[#222222]">作業時入力</h2>
           <p className="mt-1 text-xs text-[#666666]">本日の作業を管理します</p>
@@ -1225,7 +1225,7 @@ function WorkInputModal() {
                 <button
                   type="button"
                   onClick={() => void updateWorkStatus("completed")}
-                  className="rounded-lg bg-[#FFFF00] px-5 py-2 text-sm font-bold text-[#222222] transition-colors duration-200 ease-[ease] hover:bg-[#FFFF00]"
+                  className="rounded-lg bg-[#fff362] px-5 py-2 text-sm font-bold text-[#222222] transition-colors duration-200 ease-[ease] hover:bg-[#fff362]"
                 >
                   作業終了
                 </button>
@@ -1521,10 +1521,10 @@ function DeliveryCandidatesModal() {
         className="flex h-full min-h-[340px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6"
         aria-label="納品書詳細"
       >
-        <div className="h-[14px] w-full rounded-t-[20px] bg-[#FFFF00]" aria-hidden="true" />
+        <div className="h-[14px] w-full rounded-t-[20px] bg-[#fff362]" aria-hidden="true" />
 
         <div className="mt-3 flex items-start gap-3">
-          <span className="mt-1 h-10 w-[5px] rounded-full bg-[#FFFF00]" aria-hidden="true" />
+          <span className="mt-1 h-10 w-[5px] rounded-full bg-[#fff362]" aria-hidden="true" />
           <div>
             <h2 className="text-2xl font-bold text-[#222222]">納品書詳細</h2>
             <p className="mt-1 text-xs text-[#666666]">納品確定が完了しました</p>
@@ -1573,7 +1573,7 @@ function DeliveryCandidatesModal() {
             onClick={() =>
               window.open(`/deliveries/${confirmedDelivery.id}/pdf`, "_blank", "noopener,noreferrer")
             }
-            className="rounded-lg bg-[#FFFF00] px-5 py-2 text-sm font-bold text-[#222222] transition-colors duration-200 ease-[ease] hover:bg-[#FFFF00]"
+            className="rounded-lg bg-[#fff362] px-5 py-2 text-sm font-bold text-[#222222] transition-colors duration-200 ease-[ease] hover:bg-[#fff362]"
           >
             納品書PDF
           </button>
@@ -1595,10 +1595,10 @@ function DeliveryCandidatesModal() {
       className="flex h-full min-h-[340px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6"
       aria-label="納品書"
     >
-      <div className="h-[14px] w-full rounded-t-[20px] bg-[#FFFF00]" aria-hidden="true" />
+      <div className="h-[14px] w-full rounded-t-[20px] bg-[#fff362]" aria-hidden="true" />
 
       <div className="mt-3 flex items-start gap-3">
-        <span className="mt-1 h-10 w-[5px] rounded-full bg-[#FFFF00]" aria-hidden="true" />
+        <span className="mt-1 h-10 w-[5px] rounded-full bg-[#fff362]" aria-hidden="true" />
         <div>
           <h2 className="text-2xl font-bold text-[#222222]">納品書</h2>
           <p className="mt-1 text-xs text-[#666666]">作業完了済みの納品候補を確認します</p>
@@ -1687,7 +1687,7 @@ function DeliveryCandidatesModal() {
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => toggleSelection(item.order_item_id)}
-                          className="h-4 w-4 accent-[#FFFF00]"
+                          className="h-4 w-4 accent-[#fff362]"
                           aria-label={`候補${item.order_item_id}を選択`}
                         />
                       </td>
@@ -1726,7 +1726,7 @@ function DeliveryCandidatesModal() {
           className={`rounded-lg px-6 py-2 text-sm font-bold text-white transition-colors duration-200 ease-[ease] ${
             selectedCandidates.length === 0 || !dateFilter || isSubmitting
               ? "cursor-not-allowed bg-[#E2E2E2] text-[#7C7C7C]"
-              : "bg-[#FFFF00] hover:bg-[#FFFF00]"
+              : "bg-[#fff362] hover:bg-[#fff362]"
           }`}
         >
           {isSubmitting ? "納品確定中..." : "納品確定"}

@@ -129,14 +129,14 @@ export default function ManagementModal() {
           aria-label="歯科医院マスター"
         >
           <div
-            className="h-[14px] w-full rounded-t-[20px] bg-[#FFFF00]"
+            className="h-[14px] w-full rounded-t-[20px] bg-[#fff362]"
             aria-hidden="true"
           />
 
           <div className="mt-3 flex items-start justify-between gap-3">
             <div className="flex items-start gap-3">
               <span
-                className="mt-1 h-10 w-[5px] rounded-full bg-[#FFFF00]"
+                className="mt-1 h-10 w-[5px] rounded-full bg-[#fff362]"
                 aria-hidden="true"
               />
 
@@ -154,7 +154,7 @@ export default function ManagementModal() {
             <button
               type="button"
               onClick={openCreateClinicModal}
-              className="shrink-0 rounded-lg bg-[#FFFF00] px-5 py-2.5 text-sm font-bold text-[#222222] transition-colors hover:bg-[#FFFF00]"
+              className="shrink-0 rounded-lg bg-[#fff362] px-5 py-2.5 text-sm font-bold text-[#222222] transition-colors hover:bg-[#fff362]"
             >
               ＋ 新規登録
             </button>
@@ -228,13 +228,13 @@ export default function ManagementModal() {
       aria-label="管理"
     >
       <div
-        className="h-[14px] w-full rounded-t-[20px] bg-[#FFFF00]"
+        className="h-[14px] w-full rounded-t-[20px] bg-[#fff362]"
         aria-hidden="true"
       />
 
       <div className="mt-3 flex items-start gap-3">
         <span
-          className="mt-1 h-10 w-[5px] rounded-full bg-[#FFFF00]"
+          className="mt-1 h-10 w-[5px] rounded-full bg-[#fff362]"
           aria-hidden="true"
         />
 

@@ -56,7 +56,7 @@ export default function ClinicModal({
       aria-label={mode === "create" ? "歯科医院を登録" : "歯科医院を編集"}
     >
       <div className="w-full max-w-[520px] overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white shadow-xl">
-        <div className="h-[10px] bg-[#FFFF00]" />
+        <div className="h-[10px] bg-[#fff362]" />
 
         <div className="p-6">
           <div className="flex items-center justify-between">
@@ -93,7 +93,7 @@ export default function ClinicModal({
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="歯科医院名を入力"
-                className="mt-2 w-full rounded-lg border border-[#DCDCDC] bg-white px-3 py-2.5 text-sm text-[#222222] outline-none transition-colors placeholder:text-[#AAAAAA] focus:border-[#FFFF00]"
+                className="mt-2 w-full rounded-lg border border-[#DCDCDC] bg-white px-3 py-2.5 text-sm text-[#222222] outline-none transition-colors placeholder:text-[#AAAAAA] focus:border-[#fff362]"
               />
             </label>
 
@@ -107,7 +107,7 @@ export default function ClinicModal({
                 value={code}
                 onChange={(event) => setCode(event.target.value)}
                 placeholder="例：KUNO"
-                className="mt-2 w-full rounded-lg border border-[#DCDCDC] bg-white px-3 py-2.5 text-sm text-[#222222] outline-none transition-colors placeholder:text-[#AAAAAA] focus:border-[#FFFF00]"
+                className="mt-2 w-full rounded-lg border border-[#DCDCDC] bg-white px-3 py-2.5 text-sm text-[#222222] outline-none transition-colors placeholder:text-[#AAAAAA] focus:border-[#fff362]"
               />
 
               <p className="mt-1.5 text-xs text-[#888888]">
@@ -132,7 +132,7 @@ export default function ClinicModal({
               className={`rounded-lg px-6 py-2.5 text-sm font-bold text-white transition-colors ${
                 !name.trim() || !code.trim()
                   ? "cursor-not-allowed bg-[#D8D8D8]"
-                  : "bg-[#FFFF00] hover:bg-[#FFFF00] text-[#222222]"
+                  : "bg-[#fff362] hover:bg-[#fff362] text-[#222222]"
               }`}
             >
               保存
