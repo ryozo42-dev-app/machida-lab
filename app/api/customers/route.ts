@@ -8,6 +8,11 @@ export async function GET() {
         id: true,
         code: true,
         name: true,
+        billing_closing_day: true,
+        billing_closing_month_end: true,
+        billing_issue_day: true,
+        billing_issue_month_end: true,
+        show_material_on_delivery: true,
       },
       orderBy: {
         name: "asc",
@@ -50,6 +55,10 @@ export async function POST(request: Request) {
         id: true,
         code: true,
         name: true,
+        billing_closing_day: true,
+        billing_closing_month_end: true,
+        billing_issue_day: true,
+        show_material_on_delivery: true,
       },
     });
 
@@ -69,11 +78,21 @@ export async function POST(request: Request) {
       data: {
         code,
         name,
+        billing_closing_day: body.billing_closing_month_end ? null : (body.billing_closing_day ?? null),
+        billing_closing_month_end: Boolean(body.billing_closing_month_end),
+        billing_issue_day: body.billing_issue_day ?? null,
+        billing_issue_month_end: Boolean(body.billing_issue_month_end),
+        show_material_on_delivery: Boolean(body.show_material_on_delivery),
       },
       select: {
         id: true,
         code: true,
         name: true,
+        billing_closing_day: true,
+        billing_closing_month_end: true,
+        billing_issue_day: true,
+        billing_issue_month_end: true,
+        show_material_on_delivery: true,
       },
     });
 

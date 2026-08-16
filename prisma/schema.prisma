@@ -24,10 +24,15 @@ model customer_private_prices {
 }
 
 model customers {
-  id         Int       @id @default(autoincrement())
-  code       String    @unique @db.VarChar(20)
-  name       String    @db.VarChar(100)
-  created_at DateTime? @default(now()) @db.Timestamp(6)
+  id                        Int       @id @default(autoincrement())
+  code                      String    @unique @db.VarChar(20)
+  name                      String    @db.VarChar(100)
+  billing_closing_day       Int?
+  billing_closing_month_end Boolean   @default(false)
+  billing_issue_day         Int?
+  billing_issue_month_end   Boolean   @default(false)
+  show_material_on_delivery Boolean   @default(false)
+  created_at                DateTime? @default(now()) @db.Timestamp(6)
 }
 
 model deliveries {

@@ -13,6 +13,11 @@ type Clinic = {
   id: number;
   code: string;
   name: string;
+  billing_closing_day: number | null;
+  billing_closing_month_end: boolean;
+  billing_issue_day: number | null;
+  billing_issue_month_end: boolean;
+  show_material_on_delivery: boolean;
 };
 
 const managementMenus: ManagementMenu[] = [
@@ -110,15 +115,53 @@ export default function ManagementModal() {
     setSelectedClinic(null);
   };
 
-  const handleClinicSave = (data: { name: string; code: string }) => {
-    console.log("[Clinic] save", {
-      mode: clinicModalMode,
-      clinicId: selectedClinic?.id ?? null,
-      name: data.name,
-      code: data.code,
-    });
+  const handleClinicSave = async (data: {
+    name: string;
+    code: string;
+    billing_closing_day: number | null;
+    billing_closing_month_end: boolean;
+    billing_issue_day: number | null;
+    billing_issue_month_end: boolean;
+    show_material_on_delivery: boolean;
+  }) => {
+    try {
+      const isEdit = clinicModalMode === "edit" && selectedClinic;
+      const url = isEdit
+        ? `/api/customers/${selectedClinic.id}`
+        : "/api/customers";
+      const method = isEdit ? "PATCH" : "POST";
 
-    closeClinicModal();
+      const response = await fetch(url, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(data),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to save customer");
+      }
+
+      const customersResponse = await fetch("/api/customers");
+      if (!customersResponse.ok) {
+        throw new Error("Failed to reload customers");
+      }
+
+      const customersData = (await customersResponse.json()) as Clinic[];
+      setCustomers(customersData);
+      setCustomersError("");
+      closeClinicModal();
+    } catch (error) {
+      console.error("Failed to save customer", error);
+      setCustomersError(
+        error instanceof Error
+          ? error.message
+          : "歯科医院の保存に失敗しました"
+      );
+    }
   };
 
   if (activeMenu === "clinic") {
