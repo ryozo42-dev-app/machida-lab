@@ -203,7 +203,7 @@ export default function ManagementModal() {
             <button
               type="button"
               onClick={() => setActiveMenu(null)}
-              className="rounded-lg border border-[#E1E1E1] bg-white px-5 py-2 text-sm font-semibold text-[#444444] hover:bg-[#F8F8F8]"
+              className="rounded-lg border border-[#fff362] bg-[#fff362] px-5 py-2 text-sm font-semibold text-[#222222] hover:bg-[#fff362]"
             >
               管理メニューに戻る
             </button>

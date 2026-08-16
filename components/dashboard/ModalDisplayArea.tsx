@@ -1723,7 +1723,7 @@ function DeliveryCandidatesModal() {
           type="button"
           onClick={() => void submitDelivery()}
           disabled={selectedCandidates.length === 0 || !dateFilter || isSubmitting}
-          className={`rounded-lg px-6 py-2 text-sm font-bold text-white transition-colors duration-200 ease-[ease] ${
+          className={`rounded-lg px-6 py-2 text-sm font-bold text-[#222222] transition-colors duration-200 ease-[ease] ${
             selectedCandidates.length === 0 || !dateFilter || isSubmitting
               ? "cursor-not-allowed bg-[#E2E2E2] text-[#7C7C7C]"
               : "bg-[#fff362] hover:bg-[#fff362]"

@@ -129,7 +129,7 @@ export default function ClinicModal({
               type="button"
               onClick={handleSave}
               disabled={!name.trim() || !code.trim()}
-              className={`rounded-lg px-6 py-2.5 text-sm font-bold text-white transition-colors ${
+              className={`rounded-lg px-6 py-2.5 text-sm font-bold text-[#222222] transition-colors ${
                 !name.trim() || !code.trim()
                   ? "cursor-not-allowed bg-[#D8D8D8]"
                   : "bg-[#fff362] hover:bg-[#fff362] text-[#222222]"
