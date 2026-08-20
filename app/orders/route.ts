@@ -22,6 +22,19 @@ function parseOptionalPositiveInt(value: unknown) {
   return parsed;
 }
 
+function parseOptionalPositiveDecimal(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return Number(parsed.toFixed(2));
+}
+
 function formatOrderNoDate(date: Date) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Tokyo",
@@ -49,6 +62,7 @@ async function parseOrderBody(req: NextRequest) {
     patient_id: Number(formData.get("patient_id")),
     insurance_item_id: formData.get("insurance_item_id"),
     private_item_id: formData.get("private_item_id"),
+    price: formData.get("price"),
     quantity: formData.get("quantity"),
     tooth_numbers: formData.getAll("tooth_numbers").map(String),
     order_date: formData.get("order_date") || new Date().toISOString(),
@@ -86,6 +100,7 @@ export async function POST(req: NextRequest) {
 
     const insuranceItemId = parseOptionalPositiveInt(body.insurance_item_id);
     const privateItemId = parseOptionalPositiveInt(body.private_item_id);
+    const unitPrice = parseOptionalPositiveDecimal(body.price);
     const rawToothNumbers: unknown[] = Array.isArray(body.tooth_numbers)
       ? body.tooth_numbers
       : [];
@@ -214,12 +229,31 @@ export async function POST(req: NextRequest) {
         },
       });
 
+      if (hasInsuranceItem && unitPrice !== null) {
+        const existingCustomerPrice = await transaction.$queryRaw<Array<{ exists: boolean }>>`
+          SELECT EXISTS (
+            SELECT 1
+            FROM customer_insurance_prices
+            WHERE customer_id = ${body.customer_id}
+              AND insurance_item_masters_id = ${insuranceItemId}
+          ) AS exists
+        `;
+
+        if (!existingCustomerPrice[0]?.exists) {
+          await transaction.$executeRaw`
+            INSERT INTO customer_insurance_prices (customer_id, insurance_item_masters_id, price)
+            VALUES (${body.customer_id}, ${insuranceItemId}, ${unitPrice})
+          `;
+        }
+      }
+
       await transaction.order_items.create({
         data: {
           order_id: createdOrder.id,
           insurance_item_id: hasInsuranceItem ? insuranceItemId : null,
           private_item_id: hasPrivateItem ? privateItemId : null,
-            quantity: 1,
+          quantity: 1,
+          unit_price: unitPrice ?? undefined,
         },
       });
 

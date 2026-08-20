@@ -73,6 +73,30 @@ type WorkItemOption = {
   type: WorkItemType;
 };
 
+type InsuranceCategoryOption = {
+  id: number;
+  name: string;
+  type: WorkItemType;
+  level: "category";
+};
+
+type InsuranceSubCategoryOption = {
+  id: number;
+  category_id: number;
+  name: string;
+  type: WorkItemType;
+  level: "sub_category";
+};
+
+type InsuranceItemOption = {
+  id: number;
+  sub_category_id: number;
+  name: string;
+  item_name: string;
+  type: WorkItemType;
+  level: "item";
+};
+
 const permanentRight = ["8", "7", "6", "5", "4", "3", "2", "1"];
 const permanentLeft = ["1", "2", "3", "4", "5", "6", "7", "8"];
 const deciduousRight = ["E", "D", "C", "B", "A"];
@@ -345,6 +369,14 @@ function OrderEntryModal() {
   const [selectedWorkItem, setSelectedWorkItem] = useState<WorkItemOption | null>(null);
   const [isWorkItemLoading, setIsWorkItemLoading] = useState(false);
   const [workItemError, setWorkItemError] = useState("");
+  const [insuranceCategories, setInsuranceCategories] = useState<InsuranceCategoryOption[]>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | "">("");
+  const [insuranceSubCategories, setInsuranceSubCategories] = useState<InsuranceSubCategoryOption[]>([]);
+  const [selectedSubCategoryId, setSelectedSubCategoryId] = useState<number | "">("");
+  const [insuranceItemMasters, setInsuranceItemMasters] = useState<InsuranceItemOption[]>([]);
+  const [selectedItemId, setSelectedItemId] = useState<number | "">("");
+  const [displayWorkName, setDisplayWorkName] = useState("");
+  const [price, setPrice] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
   const [toothType, setToothType] = useState<ToothSetType>("permanent");
   const [selectedTeeth, setSelectedTeeth] = useState<Set<string>>(new Set());
@@ -401,6 +433,12 @@ function OrderEntryModal() {
   }, []);
 
   useEffect(() => {
+    if (workItemType !== "private") {
+      setWorkItemCandidates([]);
+      setWorkItemError("");
+      return;
+    }
+
     const keyword = workItemQuery.trim();
 
     if (
@@ -457,6 +495,140 @@ function OrderEntryModal() {
       setIsWorkItemLoading(false);
     };
   }, [customerId, selectedWorkItem, workItemQuery, workItemType]);
+
+  useEffect(() => {
+    if (customerId === null || workItemType !== "insurance") {
+      setInsuranceCategories([]);
+      setSelectedCategoryId("");
+      setInsuranceSubCategories([]);
+      setSelectedSubCategoryId("");
+      setInsuranceItemMasters([]);
+      setSelectedItemId("");
+      setDisplayWorkName("");
+      setSelectedWorkItem(null);
+      setWorkItemQuery("");
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const loadInsuranceCategories = async () => {
+      try {
+        const response = await fetch(
+          `/api/work-items?customer_id=${customerId}&type=insurance`,
+          { signal: controller.signal }
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch insurance categories");
+        }
+
+        const data: InsuranceCategoryOption[] = await response.json();
+        setInsuranceCategories(data);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        console.error(error);
+        setInsuranceCategories([]);
+      }
+    };
+
+    void loadInsuranceCategories();
+
+    return () => controller.abort();
+  }, [customerId, workItemType]);
+
+  useEffect(() => {
+    if (workItemType !== "insurance") {
+      return;
+    }
+
+    if (selectedCategoryId === "") {
+      setInsuranceSubCategories([]);
+      setSelectedSubCategoryId("");
+      setInsuranceItemMasters([]);
+      setSelectedItemId("");
+      setDisplayWorkName("");
+      setSelectedWorkItem(null);
+      setWorkItemQuery("");
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const loadInsuranceSubCategories = async () => {
+      try {
+        const response = await fetch(
+          `/api/work-items?customer_id=${customerId}&type=insurance&category_id=${selectedCategoryId}`,
+          { signal: controller.signal }
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch insurance sub categories");
+        }
+
+        const data: InsuranceSubCategoryOption[] = await response.json();
+        setInsuranceSubCategories(data);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        console.error(error);
+        setInsuranceSubCategories([]);
+      }
+    };
+
+    void loadInsuranceSubCategories();
+
+    return () => controller.abort();
+  }, [customerId, selectedCategoryId, workItemType]);
+
+  useEffect(() => {
+    if (workItemType !== "insurance") {
+      return;
+    }
+
+    if (selectedSubCategoryId === "") {
+      setInsuranceItemMasters([]);
+      setSelectedItemId("");
+      setDisplayWorkName("");
+      setSelectedWorkItem(null);
+      setWorkItemQuery("");
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const loadInsuranceItemMasters = async () => {
+      try {
+        const response = await fetch(
+          `/api/work-items?customer_id=${customerId}&type=insurance&category_id=${selectedCategoryId}&sub_category_id=${selectedSubCategoryId}`,
+          { signal: controller.signal }
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch insurance item masters");
+        }
+
+        const data: InsuranceItemOption[] = await response.json();
+        setInsuranceItemMasters(data);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        console.error(error);
+        setInsuranceItemMasters([]);
+      }
+    };
+
+    void loadInsuranceItemMasters();
+
+    return () => controller.abort();
+  }, [customerId, selectedCategoryId, selectedSubCategoryId, workItemType]);
 
   useEffect(() => {
     if (customerId === null) {
@@ -564,6 +736,9 @@ function OrderEntryModal() {
       formData.append("private_item_id", String(selectedWorkItem.id));
     }
     formData.append("quantity", "1");
+    if (price.trim() !== "") {
+      formData.append("price", price);
+    }
     formData.append("order_date", new Date().toISOString());
     formData.append("delivery_date", deliveryDate || new Date().toISOString());
     formData.append("insurance_type", selectedWorkItem.type === "insurance" ? "保険" : "自費");
@@ -746,9 +921,9 @@ function OrderEntryModal() {
             </div>
           </div>
 
-          <div className="flex items-start gap-3">
+          <div className="flex items-start gap-2">
             <label className="shrink-0 pt-2 text-xs font-semibold text-[#333333]">作業内容</label>
-              <div className="w-full flex flex-col gap-1">
+              <div className="w-full min-w-0 flex flex-col gap-1">
               <div className="flex h-10 items-center gap-5 rounded-lg border border-[#E2E2E2] bg-white px-3">
                 <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#444444]">
                   <input
@@ -782,47 +957,162 @@ function OrderEntryModal() {
                 </label>
               </div>
 
-              <input
-                name="work_item_query"
-                value={workItemQuery}
-                onChange={(event) => {
-                  setWorkItemQuery(event.target.value);
-                  setSelectedWorkItem(null);
-                  setWorkItemError("");
-                }}
-                disabled={customerId === null}
-                placeholder={customerId === null ? "歯科医院を先に選択してください" : "作業内容を入力"}
-                className="mt-2 h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132] disabled:bg-[#FAFAFA] disabled:text-[#999999]"
-              />
+              {workItemType === "insurance" ? (
+                <div className="mt-2 flex w-full flex-col gap-2">
+                  <div className="flex w-full max-w-full flex-nowrap items-center gap-2">
+                    <select
+                      value={selectedCategoryId}
+                      onChange={(event) => {
+                        const nextCategoryId = event.target.value === "" ? "" : Number(event.target.value);
+                        setSelectedCategoryId(nextCategoryId);
+                        setSelectedSubCategoryId("");
+                        setSelectedItemId("");
+                        setDisplayWorkName("");
+                        setSelectedWorkItem(null);
+                        setWorkItemQuery("");
+                      }}
+                      disabled={customerId === null || insuranceCategories.length === 0}
+                      className="h-10 w-[32%] min-w-0 shrink-0 rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132] disabled:bg-[#FAFAFA] disabled:text-[#999999]"
+                    >
+                      <option value="">大分類</option>
+                      {insuranceCategories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
 
-              {workItemError ? (
-                <p className="mt-1 text-xs font-medium text-[#B42318]">{workItemError}</p>
-              ) : null}
+                    <select
+                      value={selectedSubCategoryId}
+                      onChange={(event) => {
+                        const nextSubCategoryId = event.target.value === "" ? "" : Number(event.target.value);
+                        setSelectedSubCategoryId(nextSubCategoryId);
+                        setSelectedItemId("");
+                        setDisplayWorkName("");
+                        setSelectedWorkItem(null);
+                        setWorkItemQuery("");
+                      }}
+                      disabled={selectedCategoryId === "" || insuranceSubCategories.length === 0}
+                      className="h-10 w-[32%] min-w-0 shrink-0 rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132] disabled:bg-[#FAFAFA] disabled:text-[#999999]"
+                    >
+                      <option value="">中分類</option>
+                      {insuranceSubCategories.map((subCategory) => (
+                        <option key={subCategory.id} value={subCategory.id}>
+                          {subCategory.name}
+                        </option>
+                      ))}
+                    </select>
 
-              {customerId !== null && workItemQuery.trim().length > 0 && !selectedWorkItem ? (
-                <div className="mt-1 max-h-[72px] w-full overflow-y-auto rounded-xl border border-[#ECECEC] bg-white p-1">
-                  {isWorkItemLoading ? (
-                    <p className="px-3 py-1.5 text-xs text-[#666666]">検索中...</p>
-                  ) : workItemCandidates.length > 0 ? (
-                    workItemCandidates.map((item) => (
-                      <button
-                        key={`${item.type}-${item.id}`}
-                        type="button"
-                        onClick={() => {
-                          setSelectedWorkItem(item);
-                          setWorkItemQuery(item.item_name);
-                          setWorkItemCandidates([]);
-                        }}
-                        className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[#333333] hover:bg-[#FFF8EA]"
-                      >
-                        {item.item_name}
-                      </button>
-                    ))
-                  ) : (
-                    <p className="px-3 py-1.5 text-xs text-[#666666]">候補が見つかりません</p>
-                  )}
+                    <select
+                      value={selectedItemId}
+                      onChange={(event) => {
+                        const nextItemId = event.target.value === "" ? "" : Number(event.target.value);
+                        setSelectedItemId(nextItemId);
+
+                        if (nextItemId === "") {
+                          setDisplayWorkName("");
+                          setSelectedWorkItem(null);
+                          setWorkItemQuery("");
+                          return;
+                        }
+
+                        const selectedItem = insuranceItemMasters.find((item) => item.id === nextItemId);
+                        if (!selectedItem) {
+                          return;
+                        }
+
+                        const selectedSubCategory = insuranceSubCategories.find(
+                          (subCategory) => subCategory.id === selectedSubCategoryId
+                        );
+
+                        const nextName = `${selectedSubCategory?.name ?? ""} ${selectedItem.name}`.trim();
+                        setDisplayWorkName(nextName);
+                        setSelectedWorkItem({
+                          id: selectedItem.id,
+                          item_name: nextName,
+                          type: "insurance",
+                        });
+                        setWorkItemQuery(nextName);
+                      }}
+                      disabled={selectedSubCategoryId === "" || insuranceItemMasters.length === 0}
+                      className="h-10 w-[32%] min-w-0 shrink-0 rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132] disabled:bg-[#FAFAFA] disabled:text-[#999999]"
+                    >
+                      <option value="">小分類</option>
+                      {insuranceItemMasters.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-3 rounded-lg border border-[#E7E7E7] bg-[#FCFCFC] px-3 py-2">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <span className="shrink-0 text-xs font-semibold text-[#333333]">作業名：</span>
+                      <span className="min-w-0 truncate text-sm font-medium text-[#333333]">
+                        {displayWorkName || "未選択"}
+                      </span>
+                    </div>
+
+                    <div className="w-[200px] shrink-0 border-l border-[#E7E7E7] pl-3">
+                      <label className="text-xs font-semibold text-[#333333]">価格</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={price}
+                        onChange={(event) => setPrice(event.target.value)}
+                        placeholder="0"
+                        className="mt-1 h-8 w-full rounded-md border border-[#E2E2E2] bg-white px-2 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
+                      />
+                    </div>
+                  </div>
                 </div>
-              ) : null}
+              ) : (
+                <>
+                  <input
+                    name="work_item_query"
+                    value={workItemQuery}
+                    onChange={(event) => {
+                      setWorkItemQuery(event.target.value);
+                      setSelectedWorkItem(null);
+                      setWorkItemError("");
+                    }}
+                    disabled={customerId === null}
+                    placeholder={customerId === null ? "歯科医院を先に選択してください" : "作業内容を入力"}
+                    className="mt-2 h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132] disabled:bg-[#FAFAFA] disabled:text-[#999999]"
+                  />
+
+                  {workItemError ? (
+                    <p className="mt-1 text-xs font-medium text-[#B42318]">{workItemError}</p>
+                  ) : null}
+
+                  {customerId !== null && workItemQuery.trim().length > 0 && !selectedWorkItem ? (
+                    <div className="mt-1 max-h-[72px] w-full overflow-y-auto rounded-xl border border-[#ECECEC] bg-white p-1">
+                      {isWorkItemLoading ? (
+                        <p className="px-3 py-1.5 text-xs text-[#666666]">検索中...</p>
+                      ) : workItemCandidates.length > 0 ? (
+                        workItemCandidates.map((item) => (
+                          <button
+                            key={`${item.type}-${item.id}`}
+                            type="button"
+                            onClick={() => {
+                              setSelectedWorkItem(item);
+                              setWorkItemQuery(item.item_name);
+                              setWorkItemCandidates([]);
+                            }}
+                            className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[#333333] hover:bg-[#FFF8EA]"
+                          >
+                            {item.item_name}
+                          </button>
+                        ))
+                      ) : (
+                        <p className="px-3 py-1.5 text-xs text-[#666666]">候補が見つかりません</p>
+                      )}
+                    </div>
+                  ) : null}
+                </>
+              )}
             </div>
           </div>
 
@@ -947,68 +1237,70 @@ function OrderEntryModal() {
             />
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col space-y-1.5">
-            <label className="text-xs font-semibold text-[#333333]">指示書（PDF）</label>
-            <div
-              onDragOver={(event) => {
-                event.preventDefault();
-                setIsDragActive(true);
-              }}
-              onDragLeave={() => setIsDragActive(false)}
-              onDrop={handleDrop}
-              className={`flex min-h-[76px] flex-1 items-center rounded-[12px] border-2 border-dashed p-2 transition-colors ${
-                isDragActive ? "border-[#fff362] bg-[#FFF8EA]" : "border-[#E3E3E3] bg-[#FCFCFC]"
-              }`}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="application/pdf"
-                className="hidden"
-                onChange={(event) => handleFile(event.target.files?.[0])}
-              />
+          <div className="flex min-h-0 flex-1 flex-col gap-1.5">
+            <div className="flex min-h-0 flex-1 flex-col space-y-1.5">
+              <label className="text-xs font-semibold text-[#333333]">指示書（PDF）</label>
+              <div
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setIsDragActive(true);
+                }}
+                onDragLeave={() => setIsDragActive(false)}
+                onDrop={handleDrop}
+                className={`flex min-h-[64px] flex-1 items-center rounded-[12px] border-2 border-dashed p-2 transition-colors ${
+                  isDragActive ? "border-[#fff362] bg-[#FFF8EA]" : "border-[#E3E3E3] bg-[#FCFCFC]"
+                }`}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={(event) => handleFile(event.target.files?.[0])}
+                />
 
-              <div className="flex w-full items-center justify-center gap-3 text-center">
-                <p className="text-sm font-medium text-[#555555]">PDFをドラッグ＆ドロップ</p>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="rounded-md border border-[#E1E1E1] bg-white px-3 py-1.5 text-xs font-semibold text-[#444444] transition-colors duration-200 ease-[ease] hover:bg-[#FFF7E8]"
-                >
-                  ファイル選択
-                </button>
-
-                {pdfPreviewUrl ? (
+                <div className="flex w-full items-center justify-center gap-3 text-center">
+                  <p className="text-sm font-medium text-[#555555]">PDFをドラッグ＆ドロップ</p>
                   <button
                     type="button"
-                    onClick={() => window.open(pdfPreviewUrl, "_blank", "noopener,noreferrer")}
-                    className="mt-1 flex w-full items-center justify-center gap-3 rounded-lg border border-[#E8E8E8] bg-white p-2 text-left transition-colors duration-200 ease-[ease] hover:bg-[#FFF8EA]"
-                    aria-label="アップロードしたPDFを拡大表示"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="rounded-md border border-[#E1E1E1] bg-white px-3 py-1.5 text-xs font-semibold text-[#444444] transition-colors duration-200 ease-[ease] hover:bg-[#FFF7E8]"
                   >
-                    <iframe
-                      title="PDFサムネイル"
-                      src={`${pdfPreviewUrl}#toolbar=0&navpanes=0&scrollbar=0&page=1&view=FitH`}
-                      className="h-20 w-16 rounded border border-[#E2E2E2]"
-                    />
-                    <p className="max-w-[260px] truncate text-xs text-[#666666]">{pdfName}</p>
+                    ファイル選択
                   </button>
-                ) : null}
+
+                  {pdfPreviewUrl ? (
+                    <button
+                      type="button"
+                      onClick={() => window.open(pdfPreviewUrl, "_blank", "noopener,noreferrer")}
+                      className="mt-1 flex w-full items-center justify-center gap-3 rounded-lg border border-[#E8E8E8] bg-white p-2 text-left transition-colors duration-200 ease-[ease] hover:bg-[#FFF8EA]"
+                      aria-label="アップロードしたPDFを拡大表示"
+                    >
+                      <iframe
+                        title="PDFサムネイル"
+                        src={`${pdfPreviewUrl}#toolbar=0&navpanes=0&scrollbar=0&page=1&view=FitH`}
+                        className="h-20 w-16 rounded border border-[#E2E2E2]"
+                      />
+                      <p className="max-w-[260px] truncate text-xs text-[#666666]">{pdfName}</p>
+                    </button>
+                  ) : null}
+                </div>
               </div>
             </div>
-          </div>
 
+            <div className="w-full space-y-0.5">
+              <label className="text-xs font-semibold text-[#333333]">備考</label>
+              <textarea
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                rows={1}
+                className="h-10 w-full resize-none rounded-[12px] border border-[#E2E2E2] bg-white px-3 py-2 text-sm text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
+                placeholder="備考を入力してください"
+              />
             </div>
           </div>
 
-          <div className="shrink-0 space-y-0.5">
-            <label className="text-xs font-semibold text-[#333333]">備考</label>
-            <textarea
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              rows={1}
-              className="h-10 w-full resize-none rounded-[12px] border border-[#E2E2E2] bg-white px-3 py-2 text-sm text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
-              placeholder="備考を入力してください"
-            />
+            </div>
           </div>
         </div>
         </div>
