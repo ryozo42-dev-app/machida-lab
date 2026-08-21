@@ -87,11 +87,13 @@ export async function GET() {
       ),
     ];
 
-    const [insuranceItems, privateItems] = await Promise.all([
-      prisma.insurance_items.findMany({
-        where: { id: { in: insuranceItemIds } },
-        select: { id: true, item_name: true },
-      }),
+    const [insuranceItemMasters, privateItems] = await Promise.all([
+      insuranceItemIds.length === 0
+        ? Promise.resolve([] as Array<{ id: number; name: string }>)
+        : prisma.$queryRawUnsafe<Array<{ id: number; name: string }>>(
+            "SELECT id, name FROM insurance_item_masters WHERE id = ANY($1)",
+            insuranceItemIds
+          ),
       prisma.private_items.findMany({
         where: { id: { in: privateItemIds } },
         select: { id: true, item_name: true },
@@ -107,12 +109,23 @@ export async function GET() {
     );
 
     const insuranceItemNames = new Map(
-      insuranceItems.map((item) => [item.id, item.item_name])
+      insuranceItemMasters.map((item) => [item.id, item.name])
     );
 
     const privateItemNames = new Map(
       privateItems.map((item) => [item.id, item.item_name])
     );
+
+    const bridgeByOrderId = new Map<number, boolean>();
+
+    for (const tooth of orderTeeth) {
+      const current = bridgeByOrderId.get(tooth.order_id) ?? false;
+      if (tooth.is_bridge) {
+        bridgeByOrderId.set(tooth.order_id, true);
+      } else if (!current) {
+        bridgeByOrderId.set(tooth.order_id, false);
+      }
+    }
 
     const records = orders.map((order) => {
       const items = orderItems.filter((item) => item.order_id === order.id);
@@ -134,6 +147,7 @@ export async function GET() {
         .map((tooth) => formatToothNumber(tooth.tooth_no));
 
       const pdf = orderFiles.find((file) => file.order_id === order.id);
+      const isBridge = bridgeByOrderId.get(order.id) ?? false;
 
       return {
         id: order.id,
@@ -150,6 +164,7 @@ export async function GET() {
         workStatus: order.work_status,
         completed: order.work_status === "completed",
         pdfUrl: pdf ? `/works/files/${pdf.id}` : null,
+        isBridge,
       };
     });
 

@@ -134,7 +134,65 @@ type WorkRecord = {
   workStatus: "pending" | "in_progress" | "completed";
   completed: boolean;
   pdfUrl: string | null;
+  isBridge: boolean;
 };
+
+function formatToothDisplay(value: string) {
+  const tokens = value
+    .split(/[、,，]/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  if (tokens.length === 0) {
+    return "未登録";
+  }
+
+  const formatted = tokens.map((token) => {
+    const directMatch = token.match(/^([1-8])([0-9A-Z])$/);
+
+    if (directMatch) {
+      const quadrant = Number(directMatch[1]);
+      const toothNumber = directMatch[2];
+
+      if (quadrant === 1) return `右上${toothNumber}`;
+      if (quadrant === 2) return `左上${toothNumber}`;
+      if (quadrant === 3) return `左下${toothNumber}`;
+      if (quadrant === 4) return `右下${toothNumber}`;
+      if (quadrant === 5) return `右上${toothNumber}`;
+      if (quadrant === 6) return `左上${toothNumber}`;
+      if (quadrant === 7) return `左下${toothNumber}`;
+      if (quadrant === 8) return `右下${toothNumber}`;
+    }
+
+    const positionMatch = token.match(/^(上顎|下顎)[\s　]*(右|左)[\s　]*([0-9A-Z])$/);
+
+    if (positionMatch) {
+      const jaw = positionMatch[1];
+      const side = positionMatch[2];
+      const toothNumber = positionMatch[3];
+
+      const upperRight = jaw === "上顎" && side === "右";
+      const upperLeft = jaw === "上顎" && side === "左";
+      const lowerLeft = jaw === "下顎" && side === "左";
+      const lowerRight = jaw === "下顎" && side === "右";
+
+      if (upperRight) return `右上${toothNumber}`;
+      if (upperLeft) return `左上${toothNumber}`;
+      if (lowerLeft) return `左下${toothNumber}`;
+      if (lowerRight) return `右下${toothNumber}`;
+    }
+
+    const shortDirectionMatch = token.match(/^(右上|左上|左下|右下)[\s　]*([0-9A-Z])$/);
+
+    if (shortDirectionMatch) {
+      return `${shortDirectionMatch[1]}${shortDirectionMatch[2]}`;
+    }
+
+    return token;
+  });
+
+  return formatted.join("、");
+}
 
 type DeliveryCandidate = {
   order_item_id: number;
@@ -310,10 +368,10 @@ function ToothRow({
                 key={id}
                 type="button"
                 onClick={() => onToggle(id)}
-                className={`h-6 w-5 shrink-0 rounded-md border p-0 text-[10px] font-semibold transition-[background-color,border-color] duration-200 ease-[ease] ${
+                className={`h-6 w-5 shrink-0 rounded-md border p-0 text-[10px] font-semibold transition-all duration-200 ease-[ease] ${
                   isSelected
-                    ? "border-[#fff362] bg-[#FFF8E1] text-[#8A6D1D]"
-                    : "border-[#E5E5E5] bg-white text-[#444444]"
+                    ? "border-[#E4A800] bg-[#FFF3A6] text-[#3B2D00] shadow-[inset_0_0_0_1px_rgba(228,168,0,0.2)]"
+                    : "border-[#D9D9D9] bg-white text-[#444444] hover:border-[#BFBFBF]"
                 }`}
               >
                 {tooth}
@@ -334,10 +392,10 @@ function ToothRow({
                 key={id}
                 type="button"
                 onClick={() => onToggle(id)}
-                className={`h-6 w-5 shrink-0 rounded-md border p-0 text-[10px] font-semibold transition-[background-color,border-color] duration-200 ease-[ease] ${
+                className={`h-6 w-5 shrink-0 rounded-md border p-0 text-[10px] font-semibold transition-all duration-200 ease-[ease] ${
                   isSelected
-                    ? "border-[#fff362] bg-[#FFF8E1] text-[#8A6D1D]"
-                    : "border-[#E5E5E5] bg-white text-[#444444]"
+                    ? "border-[#E4A800] bg-[#FFF3A6] text-[#3B2D00] shadow-[inset_0_0_0_1px_rgba(228,168,0,0.2)]"
+                    : "border-[#D9D9D9] bg-white text-[#444444] hover:border-[#BFBFBF]"
                 }`}
               >
                 {tooth}
@@ -379,12 +437,17 @@ function OrderEntryModal() {
   const [price, setPrice] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
   const [toothType, setToothType] = useState<ToothSetType>("permanent");
+  const [bridge, setBridge] = useState(false);
   const [selectedTeeth, setSelectedTeeth] = useState<Set<string>>(new Set());
   const [note, setNote] = useState("");
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfName, setPdfName] = useState("");
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState("");
   const [isDragActive, setIsDragActive] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
+  const [isPatientSuccessModalOpen, setIsPatientSuccessModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredPatients = patients.filter((patient) =>
@@ -663,6 +726,92 @@ function OrderEntryModal() {
     return () => controller.abort();
   }, [customerId]);
 
+  useEffect(() => {
+    if (customerId === null || selectedWorkItem === null) {
+      setPrice("");
+      return;
+    }
+
+    const controller = new AbortController();
+    const query = new URLSearchParams({
+      customer_id: String(customerId),
+      type: selectedWorkItem.type,
+    });
+
+    if (selectedWorkItem.type === "insurance") {
+      query.set("insurance_item_id", String(selectedWorkItem.id));
+    } else {
+      query.set("private_item_id", String(selectedWorkItem.id));
+    }
+
+    const loadCustomerPrice = async () => {
+      try {
+        const response = await fetch(`/api/customer-prices?${query.toString()}`, {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          const errorBody = (await response.json().catch(() => null)) as { error?: string } | null;
+          console.warn("Failed to fetch customer price", errorBody?.error ?? response.statusText);
+          setPrice("");
+          return;
+        }
+
+        const data = (await response.json()) as { price: string | number | null };
+        setPrice(data.price === null || data.price === undefined ? "" : String(data.price));
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        console.error("Customer price fetch failed", error);
+        setPrice("");
+      }
+    };
+
+    void loadCustomerPrice();
+
+    return () => controller.abort();
+  }, [customerId, selectedWorkItem]);
+
+  const resetOrderForm = () => {
+    setCustomerId(customers[0]?.id ?? null);
+    setPatients([]);
+    setPatientId(null);
+    setIsPatientSelected(false);
+    setPatientQuery("");
+    setPatientKana("");
+    setWorkItemType("insurance");
+    setWorkItemQuery("");
+    setWorkItemCandidates([]);
+    setSelectedWorkItem(null);
+    setIsWorkItemLoading(false);
+    setWorkItemError("");
+    setInsuranceCategories([]);
+    setSelectedCategoryId("");
+    setInsuranceSubCategories([]);
+    setSelectedSubCategoryId("");
+    setInsuranceItemMasters([]);
+    setSelectedItemId("");
+    setDisplayWorkName("");
+    setPrice("");
+    setDeliveryDate("");
+    setToothType("permanent");
+    setBridge(false);
+    setSelectedTeeth(new Set());
+    setNote("");
+    if (pdfPreviewUrl) {
+      URL.revokeObjectURL(pdfPreviewUrl);
+    }
+    setPdfFile(null);
+    setPdfName("");
+    setPdfPreviewUrl("");
+    setIsDragActive(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
   const toggleTooth = (toothId: string) => {
     setSelectedTeeth((prev) => {
       const next = new Set(prev);
@@ -710,22 +859,22 @@ function OrderEntryModal() {
 
   const submitOrder = async () => {
     if (customerId === null) {
-      alert("歯科医院を選択してください");
+      setSubmitSuccess(false);
+      setSubmitError("歯科医院を選択してください");
       return;
     }
 
     if (patientId === null) {
-      alert("患者を選択してください");
+      setSubmitSuccess(false);
+      setSubmitError("患者を選択してください");
       return;
     }
 
     if (selectedWorkItem === null) {
-      alert("作業内容を選択してください");
+      setSubmitSuccess(false);
+      setSubmitError("作業内容を選択してください");
       return;
     }
-
-    console.log("submit!!");
-    alert("submit!!");
 
     const formData = new FormData();
     formData.append("customer_id", String(customerId));
@@ -743,6 +892,7 @@ function OrderEntryModal() {
     formData.append("delivery_date", deliveryDate || new Date().toISOString());
     formData.append("insurance_type", selectedWorkItem.type === "insurance" ? "保険" : "自費");
     formData.append("remarks", note);
+    formData.append("bridge", String(bridge));
 
     Array.from(selectedTeeth)
       .map(toFdiToothNumber)
@@ -763,10 +913,15 @@ function OrderEntryModal() {
         throw new Error("Order registration failed");
       }
 
-      alert("受注登録しました！");
+      setSubmitError("");
+      resetOrderForm();
+      setSubmitSuccess(true);
+      setIsSuccessModalOpen(true);
     } catch (error) {
       console.error(error);
-      alert("登録に失敗しました");
+      setSubmitSuccess(false);
+      setIsSuccessModalOpen(false);
+      setSubmitError("受注登録に失敗しました");
     }
   };
 
@@ -832,8 +987,7 @@ function OrderEntryModal() {
       setPatientQuery(createdPatient.patient_name);
       setPatientKana(createdPatient.patient_kana ?? "");
       setIsPatientSelected(true);
-
-      alert("患者を追加しました");
+      setIsPatientSuccessModalOpen(true);
     } catch (error) {
       console.error(error);
       alert(error instanceof Error ? error.message : "患者追加に失敗しました");
@@ -859,6 +1013,59 @@ function OrderEntryModal() {
           <p className="mt-1 text-xs text-[#666666]">新しい受注を登録します</p>
         </div>
       </div>
+
+      {submitError ? (
+        <div className="mt-4 rounded-xl border border-[#F4C7C7] bg-[#FFF3F3] px-4 py-3 text-sm text-[#A63C3C]">
+          {submitError}
+        </div>
+      ) : null}
+
+      {isSuccessModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-[1px]">
+          <div className="w-full max-w-sm rounded-[18px] border border-[#E9E9E9] bg-white px-6 py-7 text-center shadow-[0_18px_48px_rgba(0,0,0,0.14)]">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#EAF7EA] text-3xl text-[#4D9A57]">
+              ✓
+            </div>
+
+            <h3 className="mt-5 text-xl font-bold text-[#1F1F1F]">受注登録完了</h3>
+            <p className="mt-3 text-sm text-[#666666]">受注を登録しました</p>
+
+            <button
+              type="button"
+              onClick={() => {
+                setIsSuccessModalOpen(false);
+                setSubmitSuccess(false);
+              }}
+              className="mt-6 h-10 w-full rounded-lg bg-[#fff362] px-4 text-sm font-bold text-[#222222] transition-colors duration-200 ease-[ease] hover:bg-[#f4e64f]"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {isPatientSuccessModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-[1px]">
+          <div className="w-full max-w-sm rounded-[18px] border border-[#E9E9E9] bg-white px-6 py-7 text-center shadow-[0_18px_48px_rgba(0,0,0,0.14)]">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#EAF7EA] text-3xl text-[#4D9A57]">
+              ✓
+            </div>
+
+            <h3 className="mt-5 text-xl font-bold text-[#1F1F1F]">患者登録完了</h3>
+            <p className="mt-3 text-sm text-[#666666]">患者を登録しました</p>
+
+            <button
+              type="button"
+              onClick={() => {
+                setIsPatientSuccessModalOpen(false);
+              }}
+              className="mt-6 h-10 w-full rounded-lg bg-[#fff362] px-4 text-sm font-bold text-[#222222] transition-colors duration-200 ease-[ease] hover:bg-[#f4e64f]"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <form
         className="mt-4 flex min-h-0 flex-1 flex-col"
@@ -1054,7 +1261,7 @@ function OrderEntryModal() {
                       </span>
                     </div>
 
-                    <div className="w-[200px] shrink-0 border-l border-[#E7E7E7] pl-3">
+                    <div className="w-[120px] shrink-0 border-l border-[#E7E7E7] pl-3">
                       <label className="text-xs font-semibold text-[#333333]">価格</label>
                       <input
                         type="number"
@@ -1130,27 +1337,37 @@ function OrderEntryModal() {
           <div className="flex min-h-0 flex-1 flex-col gap-1 rounded-[14px] border border-[#E7E7E7] bg-white p-2">
             <div className="flex items-center justify-between gap-4">
               <label className="text-xs font-semibold text-[#333333]">歯式</label>
-              <div className="flex gap-4">
-              <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#444444]">
-                <input
-                  type="radio"
-                  name="toothType"
-                  checked={toothType === "permanent"}
-                  onChange={() => setToothType("permanent")}
-                  className="h-3.5 w-3.5 accent-[#fff362]"
-                />
-                永久歯
-              </label>
-              <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#444444]">
-                <input
-                  type="radio"
-                  name="toothType"
-                  checked={toothType === "deciduous"}
-                  onChange={() => setToothType("deciduous")}
-                  className="h-3.5 w-3.5 accent-[#fff362]"
-                />
-                乳歯
-              </label>
+              <div className="flex items-center gap-4">
+                <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#444444]">
+                  <input
+                    type="checkbox"
+                    name="bridge"
+                    checked={bridge ?? false}
+                    onChange={(event) => setBridge(event.target.checked)}
+                    className="h-3.5 w-3.5 accent-[#fff362]"
+                  />
+                  ブリッジ
+                </label>
+                <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#444444]">
+                  <input
+                    type="radio"
+                    name="toothType"
+                    checked={toothType === "permanent"}
+                    onChange={() => setToothType("permanent")}
+                    className="h-3.5 w-3.5 accent-[#fff362]"
+                  />
+                  永久歯
+                </label>
+                <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#444444]">
+                  <input
+                    type="radio"
+                    name="toothType"
+                    checked={toothType === "deciduous"}
+                    onChange={() => setToothType("deciduous")}
+                    className="h-3.5 w-3.5 accent-[#fff362]"
+                  />
+                  乳歯
+                </label>
               </div>
             </div>
 
@@ -1470,7 +1687,13 @@ function WorkInputModal() {
                 <p><span className="font-semibold text-[#555555]">患者名:</span> <span className="text-[#222222]">{selectedRecord.patient}</span></p>
                 <p><span className="font-semibold text-[#555555]">作業内容:</span> <span className="text-[#222222]">{selectedRecord.workType}</span></p>
                 <p><span className="font-semibold text-[#555555]">納品予定日:</span> <span className="text-[#222222]">{selectedRecord.deliveryDate}</span></p>
-                <p><span className="font-semibold text-[#555555]">歯式:</span> <span className="text-[#222222]">{selectedRecord.tooth}</span></p>
+                <p>
+                  <span className="font-semibold text-[#555555]">歯式:</span>
+                  <span className="text-[#222222]"> {formatToothDisplay(selectedRecord.tooth)}</span>
+                  {selectedRecord.isBridge ? (
+                    <span className="ml-1 inline-block rounded bg-[#FFF3A6] px-1.5 py-0.5 text-[11px] font-bold text-[#3B2D00]">【bridge】</span>
+                  ) : null}
+                </p>
               </div>
 
               <div className="mt-2 grid grid-cols-[110px_1fr] gap-3">
