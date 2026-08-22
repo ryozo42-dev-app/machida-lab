@@ -1,0 +1,1 @@
+DROP TABLE "insurance_items";

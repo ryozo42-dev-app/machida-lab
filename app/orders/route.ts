@@ -97,6 +97,15 @@ async function parseOrderBody(req: NextRequest) {
 
     private_item_id: formData.get("private_item_id"),
 
+    work_name: String(
+      formData.get("work_name") ?? ""
+    ),
+
+    base_up_support_target: parseBoolean(
+      formData.get("base_up_support_target"),
+      false
+    ),
+
     price: formData.get("price"),
 
     quantity: formData.get("quantity"),
@@ -160,6 +169,8 @@ export async function POST(req: NextRequest) {
       patient_id: body.patient_id,
       insurance_item_id: body.insurance_item_id,
       private_item_id: body.private_item_id,
+      work_name: body.work_name,
+      base_up_support_target: body.base_up_support_target,
       price: body.price,
       quantity: body.quantity,
       tooth_numbers: body.tooth_numbers,
@@ -200,6 +211,11 @@ export async function POST(req: NextRequest) {
       parseOptionalPositiveDecimal(
         body.price
       );
+
+    const quantity =
+      parseOptionalPositiveInt(
+        body.quantity
+      ) ?? 1;
 
     const rawToothNumbers: unknown[] =
       Array.isArray(body.tooth_numbers)
@@ -356,6 +372,11 @@ export async function POST(req: NextRequest) {
         ? "保険"
         : "自費";
 
+    const workName =
+      typeof body.work_name === "string"
+        ? body.work_name.trim()
+        : "";
+
     /*
      * insurance_type確認
      */
@@ -405,18 +426,13 @@ export async function POST(req: NextRequest) {
      * 保険項目存在確認
      */
     if (hasInsuranceItem) {
-      const insuranceItem =
-        await prisma.insurance_items.findUnique(
-          {
-            where: {
-              id: insuranceItemId!,
-            },
-
-            select: {
-              id: true,
-            },
-          }
-        );
+      const [insuranceItem] =
+        await prisma.$queryRaw<Array<{ id: number }>>`
+          SELECT id
+          FROM insurance_item_masters
+          WHERE id = ${insuranceItemId}
+          LIMIT 1
+        `;
 
       if (!insuranceItem) {
         return NextResponse.json(
@@ -635,7 +651,7 @@ export async function POST(req: NextRequest) {
             order_id: createdOrder.id,
             insurance_item_id: hasInsuranceItem ? insuranceItemId : null,
             private_item_id: hasPrivateItem ? privateItemId : null,
-            quantity: 1,
+            quantity,
             unit_price: unitPrice ?? undefined,
           });
 
@@ -655,7 +671,18 @@ export async function POST(req: NextRequest) {
                     ? privateItemId
                     : null,
 
-                quantity: 1,
+                work_name:
+                  workName.length > 0
+                    ? workName
+                    : null,
+
+                base_up_support_target:
+                  parseBoolean(
+                    body.base_up_support_target,
+                    false
+                  ),
+
+                quantity,
 
                 unit_price:
                   unitPrice ??

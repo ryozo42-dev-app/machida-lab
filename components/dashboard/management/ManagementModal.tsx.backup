@@ -1,0 +1,76 @@
+"use client";
+
+import { useState } from "react";
+
+type ManagementMenu = {
+  id: string;
+  title: string;
+  description: string;
+};
+
+const managementMenus: ManagementMenu[] = [
+  { id: "clinic", title: "歯科医院マスター", description: "歯科医院の登録・編集" },
+  { id: "patient", title: "患者マスター", description: "患者情報の登録・編集" },
+  { id: "user", title: "ユーザーマスター", description: "ユーザー・権限の管理" },
+  { id: "supplier", title: "仕入れマスター", description: "仕入れ先・仕入れ情報の管理" },
+  { id: "material", title: "材料管理", description: "材料・医院別預かり材の管理" },
+];
+
+export default function ManagementModal() {
+  const [activeMenu, setActiveMenu] = useState<string | null>(null);
+
+  if (activeMenu === "clinic") {
+    return (
+      <section className="flex h-full min-h-[340px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6" aria-label="歯科医院マスター">
+        <div className="h-[14px] w-full rounded-t-[20px] bg-[#F5A200]" aria-hidden="true" />
+        <div className="mt-3 flex items-start gap-3">
+          <span className="mt-1 h-10 w-[5px] rounded-full bg-[#F5A200]" aria-hidden="true" />
+          <div>
+            <h2 className="text-2xl font-bold text-[#222222]">歯科医院マスター</h2>
+            <p className="mt-1 text-xs text-[#666666]">歯科医院の登録・編集を行います</p>
+          </div>
+        </div>
+        <div className="mt-5 flex flex-1 items-center justify-center rounded-[16px] border border-[#E8E8E8] bg-[#FCFCFC]">
+          <p className="text-sm text-[#666666]">歯科医院マスターを準備中です</p>
+        </div>
+        <div className="mt-3 flex justify-end border-t border-[#ECECEC] pt-3">
+          <button type="button" onClick={() => setActiveMenu(null)} className="rounded-lg border border-[#E1E1E1] bg-white px-5 py-2 text-sm font-semibold text-[#444444] hover:bg-[#F8F8F8]">管理メニューに戻る</button>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section
+      className="flex h-full min-h-[340px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6"
+      aria-label="管理"
+    >
+      <div className="h-[14px] w-full rounded-t-[20px] bg-[#F5A200]" aria-hidden="true" />
+
+      <div className="mt-3 flex items-start gap-3">
+        <span className="mt-1 h-10 w-[5px] rounded-full bg-[#F5A200]" aria-hidden="true" />
+        <div>
+          <h2 className="text-2xl font-bold text-[#222222]">管理</h2>
+          <p className="mt-1 text-xs text-[#666666]">マスター・各種管理を行います</p>
+        </div>
+      </div>
+
+      <div className="mt-5 grid min-h-0 flex-1 grid-cols-2 gap-4">
+        {managementMenus.map((menu) => (
+          <button
+            key={menu.id}
+            type="button"
+            onClick={() => setActiveMenu(menu.id)}
+            className="flex min-h-[105px] items-center justify-between rounded-[16px] border border-[#E8E8E8] bg-white px-5 py-4 text-left transition-colors duration-200 hover:bg-[#FAFAFA]"
+          >
+            <div className="min-w-0">
+              <p className="text-base font-bold text-[#222222]">{menu.title}</p>
+              <p className="mt-1 text-xs text-[#777777]">{menu.description}</p>
+            </div>
+            <span className="ml-4 shrink-0 text-xl text-[#A7A7A7]" aria-hidden="true">›</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}

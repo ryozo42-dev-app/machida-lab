@@ -16,16 +16,22 @@ const LOCAL_CHROME_CANDIDATES = [
 const DEFAULT_CHROMIUM_PACK_URL =
   "https://github.com/Sparticuz/chromium/releases/download/v147.0.0/chromium-v147.0.0-pack.x64.tar";
 
+const BASE_UP_SUPPORT_AMOUNT_PER_ITEM = 136;
+
 type DeliveryPdfItem = {
   delivery_item_id: number;
   order_item_id: number;
-  order_no: string;
   patient_name: string;
   work_type_name: string;
-  tooth_numbers: string[];
+  teeth: DeliveryPdfTooth[];
   quantity: number;
   unit_price: string;
   amount: string;
+};
+
+type DeliveryPdfTooth = {
+  tooth_no: string;
+  is_bridge: boolean;
 };
 
 type DeliveryPdfData = {
@@ -33,11 +39,21 @@ type DeliveryPdfData = {
   delivery_no: string;
   customer_name: string;
   delivery_date: string;
+  material_summary: DeliveryMaterialSummaryItem[];
   total_amount: string;
   tax_rate: Prisma.Decimal | null;
   tax_amount: Prisma.Decimal | null;
   total_amount_including_tax: Prisma.Decimal | null;
+  total_amount_with_base_up_support: string;
+  base_up_support_amount: string | null;
   items: DeliveryPdfItem[];
+};
+
+type DeliveryMaterialSummaryItem = {
+  label: string;
+  unit: string;
+  used_quantity: string;
+  remaining_quantity: string;
 };
 
 function parsePositiveInteger(value: string) {
@@ -57,7 +73,10 @@ function formatDate(date: Date, separator = "/") {
     month: "2-digit",
     day: "2-digit",
   }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  const values = Object.fromEntries(
+    parts.map((part) => [part.type, part.value])
+  );
 
   return `${values.year}${separator}${values.month}${separator}${values.day}`;
 }
@@ -72,6 +91,28 @@ function formatYen(value: Prisma.Decimal | null) {
     currency: "JPY",
     maximumFractionDigits: 0,
   }).format(Number(value));
+}
+
+function formatPlainYen(value: number) {
+  return `${new Intl.NumberFormat("ja-JP").format(value)}円`;
+}
+
+function formatMaterialQuantity(value: Prisma.Decimal | number) {
+  return new Intl.NumberFormat("ja-JP", {
+    maximumFractionDigits: 3,
+  }).format(Number(value));
+}
+
+function formatMaterialLabel(name: string) {
+  if (name.includes("ミロ")) {
+    return "ミロ";
+  }
+
+  if (name.includes("パラ")) {
+    return "パラ";
+  }
+
+  return name;
 }
 
 function formatPercent(value: Prisma.Decimal | null) {
@@ -91,6 +132,213 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#39;");
 }
 
+type ToothChart = {
+  upperRight: ToothChartValue[];
+  upperLeft: ToothChartValue[];
+  lowerRight: ToothChartValue[];
+  lowerLeft: ToothChartValue[];
+  invalid: string[];
+};
+
+type ToothChartValue = {
+  value: string;
+  isBridge: boolean;
+};
+
+function createEmptyToothChart(): ToothChart {
+  return {
+    upperRight: [],
+    upperLeft: [],
+    lowerRight: [],
+    lowerLeft: [],
+    invalid: [],
+  };
+}
+
+function sortToothValues(values: ToothChartValue[]) {
+  return [...values].sort((first, second) => {
+    const firstNumber = Number(first.value);
+    const secondNumber = Number(second.value);
+
+    if (
+      Number.isFinite(firstNumber) &&
+      Number.isFinite(secondNumber)
+    ) {
+      return firstNumber - secondNumber;
+    }
+
+    return first.value.localeCompare(second.value, "ja");
+  });
+}
+
+function createToothChart(teeth: DeliveryPdfTooth[]) {
+  const chart = createEmptyToothChart();
+
+  for (const tooth of teeth) {
+    const normalized = tooth.tooth_no.trim();
+    const match = normalized.match(/^([1-8])([1-8])$/);
+
+    if (!match) {
+      chart.invalid.push(normalized);
+      continue;
+    }
+
+    const quadrant = Number(match[1]);
+    const position = match[2];
+
+    const value = {
+      value: position,
+      isBridge: tooth.is_bridge,
+    };
+
+    if (quadrant === 1 || quadrant === 5) {
+      chart.upperRight.push(value);
+    } else if (quadrant === 2 || quadrant === 6) {
+      chart.upperLeft.push(value);
+    } else if (quadrant === 3 || quadrant === 7) {
+      chart.lowerLeft.push(value);
+    } else if (quadrant === 4 || quadrant === 8) {
+      chart.lowerRight.push(value);
+    }
+  }
+
+  chart.upperRight = sortToothValues(chart.upperRight);
+  chart.upperLeft = sortToothValues(chart.upperLeft);
+  chart.lowerRight = sortToothValues(chart.lowerRight);
+  chart.lowerLeft = sortToothValues(chart.lowerLeft);
+
+  return chart;
+}
+
+function expandBridgeValues(values: ToothChartValue[]) {
+  const bridgeNumbers = values
+    .filter((tooth) => tooth.isBridge)
+    .map((tooth) => Number(tooth.value))
+    .filter((value) => Number.isInteger(value));
+
+  if (bridgeNumbers.length < 2) {
+    return values;
+  }
+
+  const bridgeStart = Math.min(...bridgeNumbers);
+  const bridgeEnd = Math.max(...bridgeNumbers);
+  const expanded = new Map<number, ToothChartValue>();
+
+  for (const tooth of values) {
+    const toothNumber = Number(tooth.value);
+
+    if (Number.isInteger(toothNumber)) {
+      expanded.set(toothNumber, {
+        value: tooth.value,
+        isBridge: false,
+      });
+    }
+  }
+
+  for (
+    let toothNumber = bridgeStart;
+    toothNumber <= bridgeEnd;
+    toothNumber += 1
+  ) {
+    expanded.set(toothNumber, {
+      value: String(toothNumber),
+      isBridge:
+        toothNumber === bridgeStart || toothNumber === bridgeEnd,
+    });
+  }
+
+  return sortToothValues([...expanded.values()]);
+}
+
+function renderToothSide(values: ToothChartValue[]) {
+  const displayValues = expandBridgeValues(values);
+
+  const bridgeIndexes = displayValues.flatMap((tooth, index) =>
+    tooth.isBridge ? [index] : []
+  );
+
+  const bridgeStart = bridgeIndexes[0] ?? -1;
+  const bridgeEnd = bridgeIndexes.at(-1) ?? -1;
+
+  return displayValues
+    .map((tooth, index) => {
+      const escapedValue = escapeHtml(tooth.value);
+
+      if (
+        tooth.isBridge &&
+        (index === bridgeStart || index === bridgeEnd)
+      ) {
+        return `<span class="tooth-bridge-end">${escapedValue}</span>`;
+      }
+
+      return `<span class="tooth-number">${escapedValue}</span>`;
+    })
+    .join(" ");
+}
+
+function renderToothNumbersHtml(teeth: DeliveryPdfTooth[]) {
+  if (teeth.length === 0) {
+    return `<span class="tooth-empty">-</span>`;
+  }
+
+  const chart = createToothChart(teeth);
+
+  const hasUpper =
+    chart.upperRight.length > 0 ||
+    chart.upperLeft.length > 0;
+
+  const hasLower =
+    chart.lowerRight.length > 0 ||
+    chart.lowerLeft.length > 0;
+
+  const hasChartValue = hasUpper || hasLower;
+
+  if (!hasChartValue) {
+    return `<span>${teeth
+      .map((tooth) => escapeHtml(tooth.tooth_no))
+      .join(", ")}</span>`;
+  }
+
+  const invalidHtml =
+    chart.invalid.length > 0
+      ? `<div class="tooth-invalid">${chart.invalid
+          .map(escapeHtml)
+          .join(", ")}</div>`
+      : "";
+
+  return `
+    <div class="tooth-chart" aria-label="歯式">
+      <div class="tooth-row tooth-row-upper">
+        <div class="tooth-side tooth-side-right">${renderToothSide(
+          chart.upperRight
+        )}</div>
+        <div class="tooth-axis tooth-axis-upper${
+          hasUpper ? " is-visible" : ""
+        }"></div>
+        <div class="tooth-side tooth-side-left">${renderToothSide(
+          chart.upperLeft
+        )}</div>
+      </div>
+
+      <div class="tooth-boundary"></div>
+
+      <div class="tooth-row tooth-row-lower">
+        <div class="tooth-side tooth-side-right">${renderToothSide(
+          chart.lowerRight
+        )}</div>
+        <div class="tooth-axis tooth-axis-lower${
+          hasLower ? " is-visible" : ""
+        }"></div>
+        <div class="tooth-side tooth-side-left">${renderToothSide(
+          chart.lowerLeft
+        )}</div>
+      </div>
+    </div>
+
+    ${invalidHtml}
+  `;
+}
+
 function findLocalChromePath() {
   for (const candidate of LOCAL_CHROME_CANDIDATES) {
     if (fs.existsSync(candidate)) {
@@ -102,13 +350,17 @@ function findLocalChromePath() {
 }
 
 async function createBrowser() {
-  const localChromePath = !process.env.VERCEL ? findLocalChromePath() : null;
+  const localChromePath =
+    !process.env.VERCEL ? findLocalChromePath() : null;
 
   if (localChromePath) {
     return puppeteer.launch({
       executablePath: localChromePath,
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+      ],
     });
   }
 
@@ -116,10 +368,15 @@ async function createBrowser() {
     process.env.CHROMIUM_PACK_LOCATION ||
     process.env.CHROMIUM_PACK_URL ||
     DEFAULT_CHROMIUM_PACK_URL;
-  const executablePath = await chromium.executablePath(packLocation);
+
+  const executablePath =
+    await chromium.executablePath(packLocation);
 
   return puppeteer.launch({
-    args: puppeteer.defaultArgs({ args: chromium.args, headless: "shell" }),
+    args: puppeteer.defaultArgs({
+      args: chromium.args,
+      headless: "shell",
+    }),
     executablePath,
     headless: "shell",
     defaultViewport: {
@@ -130,7 +387,9 @@ async function createBrowser() {
   });
 }
 
-async function fetchDeliveryPdfData(deliveryId: number): Promise<DeliveryPdfData | null> {
+async function fetchDeliveryPdfData(
+  deliveryId: number
+): Promise<DeliveryPdfData | null> {
   const delivery = await prisma.deliveries.findUnique({
     where: { id: deliveryId },
     select: {
@@ -159,7 +418,10 @@ async function fetchDeliveryPdfData(deliveryId: number): Promise<DeliveryPdfData
     return null;
   }
 
-  const orderItemIds = delivery.delivery_items.map((item) => item.order_item_id);
+  const orderItemIds = delivery.delivery_items.map(
+    (item) => item.order_item_id
+  );
+
   const orderItems = await prisma.order_items.findMany({
     where: {
       id: {
@@ -171,10 +433,36 @@ async function fetchDeliveryPdfData(deliveryId: number): Promise<DeliveryPdfData
       order_id: true,
       insurance_item_id: true,
       private_item_id: true,
+      work_name: true,
+      base_up_support_target: true,
+      quantity: true,
     },
   });
 
-  const orderIds = [...new Set(orderItems.map((item) => item.order_id))];
+  const orderIds = [
+    ...new Set(orderItems.map((item) => item.order_id)),
+  ];
+
+  const insuranceItemIds = [
+    ...new Set(
+      orderItems.flatMap((item) =>
+        item.insurance_item_id === null
+          ? []
+          : [item.insurance_item_id]
+      )
+    ),
+  ];
+
+  const privateItemIds = [
+    ...new Set(
+      orderItems.flatMap((item) =>
+        item.private_item_id === null
+          ? []
+          : [item.private_item_id]
+      )
+    ),
+  ];
+
   const orders = await prisma.orders.findMany({
     where: {
       id: {
@@ -188,145 +476,353 @@ async function fetchDeliveryPdfData(deliveryId: number): Promise<DeliveryPdfData
     },
   });
 
-  const [customer, orderTeeth, insuranceItems, privateItems, patients] =
-    await Promise.all([
-      prisma.customers.findUnique({
-        where: { id: delivery.customer_id },
-        select: { name: true },
-      }),
-      prisma.order_teeth.findMany({
-        where: {
-          order_id: {
-            in: orderIds,
-          },
-        },
-        orderBy: [{ order_id: "asc" }, { id: "asc" }],
-      }),
-      prisma.insurance_items.findMany({
-        where: {
-          id: {
-            in: [
-              ...new Set(
-                orderItems.flatMap((item) =>
-                  item.insurance_item_id === null ? [] : [item.insurance_item_id]
-                )
-              ),
-            ],
-          },
-        },
-        select: {
-          id: true,
-          item_name: true,
-        },
-      }),
-      prisma.private_items.findMany({
-        where: {
-          id: {
-            in: [
-              ...new Set(
-                orderItems.flatMap((item) =>
-                  item.private_item_id === null ? [] : [item.private_item_id]
-                )
-              ),
-            ],
-          },
-        },
-        select: {
-          id: true,
-          item_name: true,
-        },
-      }),
-      prisma.patients.findMany({
-        where: {
-          id: {
-            in: [...new Set(orders.map((order) => order.patient_id))],
-          },
-        },
-        select: {
-          id: true,
-          patient_name: true,
-        },
-      }),
-    ]);
+  const [
+    customer,
+    orderTeeth,
+    insuranceItems,
+    privateItems,
+    patients,
+    customerMaterials,
+    materialTransactions,
+  ] = await Promise.all([
+    prisma.customers.findUnique({
+      where: { id: delivery.customer_id },
+      select: {
+        name: true,
+        show_material_on_delivery: true,
+      },
+    }),
 
-  const orderItemById = new Map(orderItems.map((item) => [item.id, item]));
-  const orderById = new Map(orders.map((order) => [order.id, order]));
-  const patientNameById = new Map(patients.map((patient) => [patient.id, patient.patient_name]));
-  const insuranceNameById = new Map(insuranceItems.map((item) => [item.id, item.item_name]));
-  const privateNameById = new Map(privateItems.map((item) => [item.id, item.item_name]));
-  const toothNumbersByOrderId = orderTeeth.reduce<Map<number, string[]>>((acc, tooth) => {
-    const current = acc.get(tooth.order_id) ?? [];
-    current.push(tooth.tooth_no);
-    acc.set(tooth.order_id, current);
-    return acc;
-  }, new Map<number, string[]>());
+    prisma.order_teeth.findMany({
+      where: {
+        order_id: {
+          in: orderIds,
+        },
+      },
+      orderBy: [
+        { order_id: "asc" },
+        { id: "asc" },
+      ],
+    }),
 
-  const items = delivery.delivery_items.map((deliveryItem) => {
-    const orderItem = orderItemById.get(deliveryItem.order_item_id);
+    insuranceItemIds.length === 0
+      ? Promise.resolve(
+          [] as Array<{
+            id: number;
+            item_name: string;
+          }>
+        )
+      : prisma.$queryRawUnsafe<
+          Array<{
+            id: number;
+            item_name: string;
+          }>
+        >(
+          `
+            SELECT
+              iim.id,
+              CONCAT_WS(
+                ' ',
+                NULLIF(TRIM(iisc.name), ''),
+                NULLIF(TRIM(iim.name), '')
+              ) AS item_name
+            FROM insurance_item_masters iim
+            LEFT JOIN insurance_sub_categories iisc
+              ON iisc.id = iim.sub_category_id
+            WHERE iim.id = ANY($1)
+          `,
+          insuranceItemIds
+        ),
 
-    if (!orderItem) {
-      throw new Error(`order_item ${deliveryItem.order_item_id} not found`);
+    prisma.private_items.findMany({
+      where: {
+        id: {
+          in: privateItemIds,
+        },
+      },
+      select: {
+        id: true,
+        item_name: true,
+      },
+    }),
+
+    prisma.patients.findMany({
+      where: {
+        id: {
+          in: [
+            ...new Set(
+              orders.map((order) => order.patient_id)
+            ),
+          ],
+        },
+      },
+      select: {
+        id: true,
+        patient_name: true,
+      },
+    }),
+
+    prisma.customer_materials.findMany({
+      where: {
+        customer_id: delivery.customer_id,
+        is_active: true,
+        report_on_delivery: true,
+      },
+      select: {
+        id: true,
+        current_quantity: true,
+        materials: {
+          select: {
+            name: true,
+            unit: true,
+          },
+        },
+      },
+      orderBy: {
+        material_id: "asc",
+      },
+    }),
+
+    prisma.material_transactions.findMany({
+      where: {
+        order_id: {
+          in: orderIds,
+        },
+        transaction_type: "use",
+      },
+      select: {
+        customer_material_id: true,
+        quantity: true,
+      },
+    }),
+  ]);
+
+  const orderItemById = new Map(
+    orderItems.map((item) => [item.id, item])
+  );
+
+  const orderById = new Map(
+    orders.map((order) => [order.id, order])
+  );
+
+  const patientNameById = new Map(
+    patients.map((patient) => [
+      patient.id,
+      patient.patient_name,
+    ])
+  );
+
+  const insuranceNameById = new Map(
+    insuranceItems.map((item) => [
+      item.id,
+      item.item_name,
+    ])
+  );
+
+  const privateNameById = new Map(
+    privateItems.map((item) => [
+      item.id,
+      item.item_name,
+    ])
+  );
+
+  const usedQuantityByCustomerMaterialId =
+    materialTransactions.reduce<
+      Map<number, Prisma.Decimal>
+    >((acc, transaction) => {
+      const current =
+        acc.get(transaction.customer_material_id) ??
+        new Prisma.Decimal(0);
+
+      acc.set(
+        transaction.customer_material_id,
+        current.add(transaction.quantity)
+      );
+
+      return acc;
+    }, new Map<number, Prisma.Decimal>());
+
+  const materialSummary =
+    customer?.show_material_on_delivery
+      ? customerMaterials.map((item) => ({
+          label: formatMaterialLabel(
+            item.materials.name
+          ),
+          unit: item.materials.unit,
+          used_quantity: formatMaterialQuantity(
+            usedQuantityByCustomerMaterialId.get(
+              item.id
+            ) ?? new Prisma.Decimal(0)
+          ),
+          remaining_quantity: formatMaterialQuantity(
+            item.current_quantity
+          ),
+        }))
+      : [];
+
+  const teethByOrderId =
+    orderTeeth.reduce<Map<number, DeliveryPdfTooth[]>>(
+      (acc, tooth) => {
+        const current =
+          acc.get(tooth.order_id) ?? [];
+
+        current.push({
+          tooth_no: tooth.tooth_no,
+          is_bridge: tooth.is_bridge,
+        });
+
+        acc.set(tooth.order_id, current);
+
+        return acc;
+      },
+      new Map<number, DeliveryPdfTooth[]>()
+    );
+
+  const items = delivery.delivery_items.map(
+    (deliveryItem) => {
+      const orderItem = orderItemById.get(
+        deliveryItem.order_item_id
+      );
+
+      if (!orderItem) {
+        throw new Error(
+          `order_item ${deliveryItem.order_item_id} not found`
+        );
+      }
+
+      const order = orderById.get(
+        orderItem.order_id
+      );
+
+      if (!order) {
+        throw new Error(
+          `order ${orderItem.order_id} not found`
+        );
+      }
+
+      const patientName =
+        patientNameById.get(order.patient_id) ??
+        "未登録";
+
+      const workTypeName =
+        orderItem.work_name?.trim() ||
+        (orderItem.insurance_item_id !== null
+          ? insuranceNameById.get(
+              orderItem.insurance_item_id
+            ) ?? "未登録"
+          : privateNameById.get(
+              orderItem.private_item_id as number
+            ) ?? "未登録");
+
+      return {
+        delivery_item_id: deliveryItem.id,
+        order_item_id: deliveryItem.order_item_id,
+        patient_name:
+          patientName === "未登録"
+            ? patientName
+            : `${patientName} 様`,
+        work_type_name: workTypeName,
+        teeth:
+          teethByOrderId.get(order.id) ?? [],
+        quantity: deliveryItem.quantity,
+        unit_price: formatYen(
+          deliveryItem.unit_price
+        ),
+        amount: formatYen(
+          deliveryItem.amount
+        ),
+      };
     }
+  );
 
-    const order = orderById.get(orderItem.order_id);
+  const totalAmount =
+    delivery.total_amount ?? null;
 
-    if (!order) {
-      throw new Error(`order ${orderItem.order_id} not found`);
-    }
+  const baseUpSupportAmount =
+    orderItems.reduce((total, orderItem) => {
+      if (!orderItem.base_up_support_target) {
+        return total;
+      }
 
-    const patientName = patientNameById.get(order.patient_id) ?? "未登録";
-    const workTypeName =
-      orderItem.insurance_item_id !== null
-        ? insuranceNameById.get(orderItem.insurance_item_id) ?? "未登録"
-        : privateNameById.get(orderItem.private_item_id as number) ?? "未登録";
+      return (
+        total +
+        BASE_UP_SUPPORT_AMOUNT_PER_ITEM *
+          (orderItem.quantity ?? 1)
+      );
+    }, 0);
 
-    return {
-      delivery_item_id: deliveryItem.id,
-      order_item_id: deliveryItem.order_item_id,
-      order_no: order.order_no ?? "",
-      patient_name: patientName === "未登録" ? patientName : `${patientName} 様`,
-      work_type_name: workTypeName,
-      tooth_numbers: toothNumbersByOrderId.get(order.id)?.map((value) => value) ?? [],
-      quantity: deliveryItem.quantity,
-      unit_price: formatYen(deliveryItem.unit_price),
-      amount: formatYen(deliveryItem.amount),
-    };
-  });
-
-  const totalAmount = delivery.total_amount ?? null;
+  const totalAmountWithBaseUpSupport = (
+    delivery.total_amount_including_tax ??
+    totalAmount ??
+    new Prisma.Decimal(0)
+  ).add(baseUpSupportAmount);
 
   return {
     id: delivery.id,
     delivery_no: delivery.delivery_no ?? "",
-    customer_name: customer?.name ?? "未登録",
-    delivery_date: formatDate(delivery.delivery_date, "-"),
+    customer_name:
+      customer?.name ?? "未登録",
+    delivery_date: formatDate(
+      delivery.delivery_date,
+      "-"
+    ),
+    material_summary: materialSummary,
     total_amount: formatYen(totalAmount),
     tax_rate: delivery.tax_rate,
     tax_amount: delivery.tax_amount,
-    total_amount_including_tax: delivery.total_amount_including_tax,
+    total_amount_including_tax:
+      delivery.total_amount_including_tax,
+    total_amount_with_base_up_support:
+      formatYen(totalAmountWithBaseUpSupport),
+    base_up_support_amount:
+      baseUpSupportAmount > 0
+        ? formatPlainYen(
+            baseUpSupportAmount
+          )
+        : null,
     items,
   };
 }
 
-function createDeliveryHtml(data: DeliveryPdfData) {
-    const font400 = fs.readFileSync(
-    path.join(process.cwd(), "public/fonts/noto-sans-jp-japanese-400-normal.woff2")
-  ).toString("base64");
+function createDeliveryHtml(
+  data: DeliveryPdfData
+) {
+  const font400 = fs
+    .readFileSync(
+      path.join(
+        process.cwd(),
+        "public/fonts/noto-sans-jp-japanese-400-normal.woff2"
+      )
+    )
+    .toString("base64");
 
-  const font700 = fs.readFileSync(
-    path.join(process.cwd(), "public/fonts/noto-sans-jp-japanese-700-normal.woff2")
-  ).toString("base64");
+  const font700 = fs
+    .readFileSync(
+      path.join(
+        process.cwd(),
+        "public/fonts/noto-sans-jp-japanese-700-normal.woff2"
+      )
+    )
+    .toString("base64");
+
   const itemsHtml = data.items
     .map(
       (item) => `
         <tr>
           <td>${escapeHtml(item.patient_name)}</td>
-          <td>${escapeHtml(item.order_no)}</td>
           <td>${escapeHtml(item.work_type_name)}</td>
-          <td>${escapeHtml(item.tooth_numbers.join(", ") || "-")}</td>
-          <td>${escapeHtml(String(item.quantity))}</td>
-          <td>${escapeHtml(item.unit_price)}</td>
-          <td>${escapeHtml(item.amount)}</td>
+          <td class="tooth-cell">
+            ${renderToothNumbersHtml(item.teeth)}
+          </td>
+          <td class="quantity-cell">
+            ${escapeHtml(String(item.quantity))}
+          </td>
+          <td class="unit-price-cell">
+            ${escapeHtml(item.unit_price)}
+          </td>
+          <td class="amount-cell">
+            ${escapeHtml(item.amount)}
+          </td>
         </tr>
       `
     )
@@ -336,36 +832,93 @@ function createDeliveryHtml(data: DeliveryPdfData) {
     data.tax_rate !== null &&
     data.tax_amount !== null &&
     data.total_amount_including_tax !== null;
+
+  const baseUpSupportHtml =
+    data.base_up_support_amount
+      ? `
+        <div class="total-row">
+          <span>ベースアップ支援金</span>
+          <span>${escapeHtml(
+            data.base_up_support_amount
+          )}</span>
+        </div>
+      `
+      : "";
+
+  const materialSummaryHtml =
+    data.material_summary.length > 0
+      ? data.material_summary
+          .map(
+            (item) => `
+              <div class="overview-material-row">
+                <span>
+                  使用${escapeHtml(
+                    item.label
+                  )} ${escapeHtml(
+                    item.used_quantity
+                  )}${escapeHtml(item.unit)}
+                </span>
+
+                <span>
+                  残${escapeHtml(
+                    item.label
+                  )} ${escapeHtml(
+                    item.remaining_quantity
+                  )}${escapeHtml(item.unit)}
+                </span>
+              </div>
+            `
+          )
+          .join("")
+      : "";
+
   const totalHtml = hasTaxSummary
     ? (() => {
         const taxRate = data.tax_rate;
         const taxAmount = data.tax_amount;
-        const totalAmountIncludingTax = data.total_amount_including_tax;
 
         return `
-        <div class="total-row">
-          <span>合計金額（税抜）</span>
-          <span>${escapeHtml(data.total_amount)}</span>
-        </div>
-        <div class="total-row">
-          <span>税率</span>
-          <span>${escapeHtml(formatPercent(taxRate))}</span>
-        </div>
-        <div class="total-row">
-          <span>消費税額</span>
-          <span>${escapeHtml(formatYen(taxAmount))}</span>
-        </div>
-        <div class="total-divider"></div>
-        <div class="total-row total-row-grand">
-          <span>合計金額（税込）</span>
-          <span>${escapeHtml(formatYen(totalAmountIncludingTax))}</span>
-        </div>
-      `;
+          <div class="total-row">
+            <span>合計金額（税抜）</span>
+            <span>${escapeHtml(
+              data.total_amount
+            )}</span>
+          </div>
+
+          <div class="total-row">
+            <span>税率</span>
+            <span>${escapeHtml(
+              formatPercent(taxRate)
+            )}</span>
+          </div>
+
+          <div class="total-row">
+            <span>消費税額</span>
+            <span>${escapeHtml(
+              formatYen(taxAmount)
+            )}</span>
+          </div>
+
+          ${baseUpSupportHtml}
+
+          <div class="total-divider"></div>
+
+          <div class="total-row total-row-grand">
+            <span>合計金額（税込）</span>
+            <span>${escapeHtml(
+              data.total_amount_with_base_up_support
+            )}</span>
+          </div>
+        `;
       })()
     : `
+        ${baseUpSupportHtml}
+
         <div class="total-row total-row-grand">
           <span>合計金額</span>
-          <span>${escapeHtml(data.total_amount)}</span>
+          <span>${escapeHtml(
+            data.total_amount_with_base_up_support
+          )}</span>
         </div>
       `;
 
@@ -373,217 +926,375 @@ function createDeliveryHtml(data: DeliveryPdfData) {
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+
     <style>
-@font-face {
-  font-family: "Noto Sans JP";
-  font-style: normal;
-  font-weight: 400;
-  src: url(data:font/woff2;base64,${font400}) format("woff2");
-}
+      @font-face {
+        font-family: "Noto Sans JP";
+        font-style: normal;
+        font-weight: 400;
+        src: url(data:font/woff2;base64,${font400})
+          format("woff2");
+      }
 
-@font-face {
-  font-family: "Noto Sans JP";
-  font-style: normal;
-  font-weight: 700;
-  src: url(data:font/woff2;base64,${font700}) format("woff2");
-}
-    @page {
-  size: A4 portrait;
-  margin: 0;
-}
+      @font-face {
+        font-family: "Noto Sans JP";
+        font-style: normal;
+        font-weight: 700;
+        src: url(data:font/woff2;base64,${font700})
+          format("woff2");
+      }
 
-* {
-  box-sizing: border-box;
-}
+      @page {
+        size: A4 portrait;
+        margin: 0;
+      }
 
-html,
-body {
-  margin: 0;
-  padding: 0;
-  background: #ffffff;
-}
+      * {
+        box-sizing: border-box;
+      }
 
-body {
-  font-family:
-    "Noto Sans JP",
-    "Hiragino Kaku Gothic ProN",
-    "Yu Gothic",
-    sans-serif;
-  color: #111111;
-  font-size: 11px;
-}
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #ffffff;
+      }
 
-.delivery-sheet {
-  width: 210mm;
-  min-height: 297mm;
-  padding: 18mm 16mm;
-  margin: 0 auto;
-  background: #ffffff;
-}
+      body {
+        font-family:
+          "Noto Sans JP",
+          "Hiragino Kaku Gothic ProN",
+          "Yu Gothic",
+          sans-serif;
+        color: #111111;
+        font-size: 11px;
+      }
 
-.delivery-header {
-  position: relative;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  width: 100%;
-}
+      .delivery-sheet {
+        width: 210mm;
+        min-height: 297mm;
+        padding: 18mm 16mm;
+        margin: 0 auto;
+        background: #ffffff;
+      }
 
-.header-left {
-  width: 62%;
-}
+      .delivery-header {
+        position: relative;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        width: 100%;
+      }
 
-.title {
-  margin: 0;
-  padding: 0;
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 1.2;
-}
+      .header-left {
+        width: 62%;
+      }
 
-.delivery-meta {
-  margin-top: 12px;
-  font-size: 11px;
-  line-height: 1.8;
-}
+      .title {
+        margin: 0;
+        padding: 0;
+        font-size: 28px;
+        font-weight: 700;
+        line-height: 1.2;
+      }
 
-.customer-name {
-  margin-top: 20px;
-  font-size: 17px;
-  font-weight: 600;
-  line-height: 1.4;
-}
+      .delivery-meta {
+        margin-top: 12px;
+        font-size: 11px;
+        line-height: 1.8;
+      }
 
-.lab-info {
-  position: absolute;
-  top: 45px;
-  right: -4px;
-  width: 210px;
-  margin: 0;
-  padding: 0;
-  font-size: 10px;
-  line-height: 1.7;
-  text-align: left;
-}
+      .customer-name {
+        margin-top: 20px;
+        font-size: 17px;
+        font-weight: 600;
+        line-height: 1.4;
+      }
 
-.lab-name {
-  margin: 0 0 5px 0;
-  padding: 0;
-  font-size: 16px;
-  font-weight: 700;
-  line-height: 1.4;
-}
+      .lab-info {
+        position: absolute;
+        top: 45px;
+        right: -4px;
+        width: 210px;
+        margin: 0;
+        padding: 0;
+        font-size: 10px;
+        line-height: 1.7;
+        text-align: left;
+      }
 
-.separator {
-  width: 100%;
-  border-top: 1px solid #222222;
-  margin-top: 18px;
-  margin-bottom: 14px;
-}
+      .lab-name {
+        margin: 0 0 5px 0;
+        padding: 0;
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1.4;
+      }
 
-.delivery-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-  font-size: 9px;
-}
+      .separator {
+        width: 100%;
+        border-top: 1px solid #222222;
+        margin-top: 18px;
+        margin-bottom: 14px;
+      }
 
-.delivery-table th,
-.delivery-table td {
-  border: 1px solid #222222;
-  padding: 7px 5px;
-  vertical-align: middle;
-}
+      /*
+       * =====================================================
+       * 納品書明細テーブル
+       *
+       * 列幅は colgroup で固定
+       *
+       * 患者名    9%
+       * 作業内容 46%
+       * 部位     16%
+       * 数量      4%
+       * 単価    12.5%
+       * 金額    12.5%
+       * 合計    100%
+       * =====================================================
+       */
 
-.delivery-table th {
-  font-weight: 600;
-  text-align: center;
-  white-space: nowrap;
-}
+      .delivery-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        font-size: 9px;
+      }
 
-.delivery-table td:nth-child(1) {
-  width: 17%;
-}
+      .delivery-table th,
+      .delivery-table td {
+        border: 1px solid #222222;
+        padding: 7px 5px;
+        vertical-align: middle;
+        overflow: hidden;
+      }
 
-.delivery-table td:nth-child(2) {
-  width: 15%;
-}
+      .delivery-table th {
+        font-weight: 600;
+        text-align: center;
+        white-space: nowrap;
+      }
 
-.delivery-table td:nth-child(3) {
-  width: 24%;
-}
+      /*
+       * 患者名
+       */
+      .delivery-table th:nth-child(1),
+      .delivery-table td:nth-child(1) {
+        text-align: left;
+      }
 
-.delivery-table td:nth-child(4) {
-  width: 10%;
-  text-align: center;
-}
+      /*
+       * 作業内容
+       */
+      .delivery-table th:nth-child(2),
+      .delivery-table td:nth-child(2) {
+        text-align: left;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
 
-.delivery-table td:nth-child(5) {
-  width: 8%;
-  text-align: right;
-}
+      /*
+       * 部位
+       */
+      .delivery-table th:nth-child(3),
+      .delivery-table td:nth-child(3) {
+        text-align: center;
+      }
 
-.delivery-table td:nth-child(6) {
-  width: 13%;
-  text-align: right;
-}
+      /*
+       * 数量
+       *
+       * colgroup側で4%に固定。
+       * 文字が広がって列幅を押し広げないようにする。
+       */
+      .delivery-table th:nth-child(4),
+      .delivery-table td:nth-child(4) {
+        text-align: center;
+        padding-left: 2px;
+        padding-right: 2px;
+        white-space: nowrap;
+      }
 
-.delivery-table td:nth-child(7) {
-  width: 13%;
-  text-align: right;
-}
+      /*
+       * 単価
+       */
+      .delivery-table th:nth-child(5),
+      .delivery-table td:nth-child(5) {
+        text-align: right;
+      }
 
-.delivery-table th:nth-child(1),
-.delivery-table th:nth-child(2),
-.delivery-table th:nth-child(3) {
-  text-align: left;
-}
+      /*
+       * 金額
+       */
+      .delivery-table th:nth-child(6),
+      .delivery-table td:nth-child(6) {
+        text-align: right;
+      }
 
-.total {
-  width: 100%;
-  display: flex;
-  justify-content: flex-end;
-  align-items: flex-start;
-  margin-top: 18px;
-  font-size: 12px;
-}
+      .delivery-table td.tooth-cell {
+        padding: 4px 3px;
+        text-align: center;
+      }
 
-.total-panel {
-  min-width: 250px;
-}
+      .tooth-chart {
+        display: grid;
+        grid-template-rows: 16px 1px 16px;
+        width: 100%;
+        min-width: 58px;
+        max-width: 74px;
+        margin: 0 auto;
+        color: #111111;
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 1;
+      }
 
-.total-row {
-  display: grid;
-  grid-template-columns: auto minmax(110px, auto);
-  column-gap: 18px;
-  align-items: baseline;
-  justify-content: end;
-  margin-top: 6px;
-}
+      .tooth-row {
+        display: grid;
+        grid-template-columns:
+          minmax(0, 1fr)
+          1px
+          minmax(0, 1fr);
+        align-items: center;
+        min-height: 0;
+      }
 
-.total-row:first-child {
-  margin-top: 0;
-}
+      .tooth-boundary {
+        width: 100%;
+        height: 1px;
+        background: #222222;
+      }
 
-.total-row span:last-child {
-  text-align: right;
-}
+      .tooth-axis {
+        width: 1px;
+        height: 100%;
+        background: transparent;
+      }
 
-.total-divider {
-  border-top: 1px solid #222222;
-  margin-top: 8px;
-  margin-bottom: 4px;
-}
+      .tooth-axis.is-visible {
+        background: #222222;
+      }
 
-.total-row-grand {
-  font-size: 16px;
-  font-weight: 700;
-}
+      .tooth-axis-upper {
+        align-self: end;
+      }
+
+      .tooth-axis-lower {
+        align-self: start;
+      }
+
+      .tooth-side {
+        min-width: 0;
+        white-space: nowrap;
+      }
+
+      .tooth-number,
+      .tooth-bridge-end {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 12px;
+        height: 12px;
+        vertical-align: middle;
+      }
+
+      .tooth-bridge-end {
+        border: 1px solid #222222;
+        border-radius: 999px;
+      }
+
+      .tooth-side-right {
+        padding-right: 7px;
+        text-align: right;
+      }
+
+      .tooth-side-left {
+        padding-left: 7px;
+        text-align: left;
+      }
+
+      .tooth-empty,
+      .tooth-invalid {
+        font-size: 9px;
+        line-height: 1.2;
+      }
+
+      .tooth-invalid {
+        margin-top: 2px;
+      }
+
+      .summary-footer {
+        width: 100%;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 24px;
+        margin-top: 18px;
+        font-size: 12px;
+      }
+
+      .overview {
+        flex: 1 1 auto;
+        min-width: 0;
+        text-align: left;
+      }
+
+      .overview-title {
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+
+      .overview-material-row {
+        display: flex;
+        gap: 22px;
+        margin-top: 5px;
+        white-space: nowrap;
+      }
+
+      .total-panel {
+        flex: 0 0 auto;
+        min-width: 250px;
+      }
+
+      .total-row {
+        display: grid;
+        grid-template-columns:
+          auto
+          minmax(110px, auto);
+        column-gap: 18px;
+        align-items: baseline;
+        justify-content: end;
+        margin-top: 6px;
+      }
+
+      .total-row:first-child {
+        margin-top: 0;
+      }
+
+      .total-row span:last-child {
+        text-align: right;
+      }
+
+      .total-divider {
+        border-top: 1px solid #222222;
+        margin-top: 8px;
+        margin-bottom: 4px;
+      }
+
+      .total-row-grand {
+        font-size: 16px;
+        font-weight: 700;
+      }
     </style>
   </head>
+
   <body>
     <main class="delivery-sheet">
+
       <header class="delivery-header">
 
         <section class="header-left">
@@ -591,21 +1302,41 @@ body {
           <h1 class="title">納品書</h1>
 
           <div class="delivery-meta">
-            <div>納品書番号：<span>${escapeHtml(data.delivery_no)}</span></div>
-            <div>納品日：<span>${escapeHtml(data.delivery_date)}</span></div>
+            <div>
+              納品書番号：
+              <span>${escapeHtml(
+                data.delivery_no
+              )}</span>
+            </div>
+
+            <div>
+              納品日：
+              <span>${escapeHtml(
+                data.delivery_date
+              )}</span>
+            </div>
           </div>
 
           <div class="customer-name">
-            ${escapeHtml(data.customer_name)} 様
+            ${escapeHtml(
+              data.customer_name
+            )} 様
           </div>
 
         </section>
 
         <section class="lab-info">
-          <div class="lab-name">町田歯科技工所</div>
+          <div class="lab-name">
+            町田歯科技工所
+          </div>
+
           <div>〒547-0034</div>
-          <div>大阪府大阪市平野区背戸口2-1-18</div>
-          <div>TEL/FAX：06-7504-6229</div>
+          <div>
+            大阪府大阪市平野区背戸口2-1-18
+          </div>
+          <div>
+            TEL/FAX：06-7504-6229
+          </div>
         </section>
 
       </header>
@@ -614,12 +1345,24 @@ body {
 
       <table class="delivery-table">
 
+        <!--
+          列幅をここで完全固定
+          9% + 46% + 16% + 4% + 12.5% + 12.5% = 100%
+        -->
+        <colgroup>
+          <col style="width: 15%;" />
+          <col style="width: 35%;" />
+          <col style="width: 20%;" />
+          <col style="width: 5%;" />
+          <col style="width: 12.5%;" />
+          <col style="width: 12.5%;" />
+        </colgroup>
+
         <thead>
           <tr>
             <th>患者名</th>
-            <th>受注No</th>
             <th>作業内容</th>
-            <th>歯式</th>
+            <th>部位</th>
             <th>数量</th>
             <th>単価</th>
             <th>金額</th>
@@ -632,10 +1375,20 @@ body {
 
       </table>
 
-      <div class="total">
+      <div class="summary-footer">
+
+        <section class="overview">
+          <div class="overview-title">
+            概要
+          </div>
+
+          ${materialSummaryHtml}
+        </section>
+
         <div class="total-panel">
           ${totalHtml}
         </div>
+
       </div>
 
     </main>
@@ -645,29 +1398,51 @@ body {
 
 export async function GET(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  {
+    params,
+  }: {
+    params: Promise<{ id: string }>;
+  }
 ) {
   const resolvedParams = await params;
-  const deliveryId = parsePositiveInteger(resolvedParams.id);
+
+  const deliveryId = parsePositiveInteger(
+    resolvedParams.id
+  );
 
   if (deliveryId === null) {
-    return NextResponse.json({ error: "Invalid delivery id" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid delivery id" },
+      { status: 400 }
+    );
   }
 
-  let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
+  let browser:
+    | Awaited<
+        ReturnType<typeof puppeteer.launch>
+      >
+    | null = null;
 
   try {
-    const data = await fetchDeliveryPdfData(deliveryId);
+    const data =
+      await fetchDeliveryPdfData(deliveryId);
 
     if (!data) {
-      return NextResponse.json({ error: "Delivery not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Delivery not found" },
+        { status: 404 }
+      );
     }
 
     const html = createDeliveryHtml(data);
 
     browser = await createBrowser();
+
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "domcontentloaded" });
+
+    await page.setContent(html, {
+      waitUntil: "domcontentloaded",
+    });
 
     const pdfBuffer = await page.pdf({
       format: "A4",
@@ -681,19 +1456,33 @@ export async function GET(
       },
     });
 
-    const fileName = `${data.delivery_no || `delivery-${data.id}`}.pdf`;
+    const fileName =
+      `${data.delivery_no || `delivery-${data.id}`}.pdf`;
 
-    return new Response(new Uint8Array(pdfBuffer), {
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`,
-        "Cache-Control": "private, no-store",
-      },
-    });
+    return new Response(
+      new Uint8Array(pdfBuffer),
+      {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition":
+            `inline; filename*=UTF-8''${encodeURIComponent(
+              fileName
+            )}`,
+          "Cache-Control":
+            "private, no-store",
+        },
+      }
+    );
   } catch (error) {
-    console.error("Failed to generate delivery PDF", error);
+    console.error(
+      "Failed to generate delivery PDF",
+      error
+    );
 
-    return NextResponse.json({ error: "Database Error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Database Error" },
+      { status: 500 }
+    );
   } finally {
     if (browser) {
       await browser.close();

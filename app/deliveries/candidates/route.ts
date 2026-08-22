@@ -153,17 +153,19 @@ export async function GET(request: NextRequest) {
 
     const [insuranceItems, privateItems, insurancePriceRows, privatePriceRows] =
       await Promise.all([
-        prisma.insurance_items.findMany({
-          where: {
-            id: {
-              in: insuranceItemIds,
-            },
-          },
-          select: {
-            id: true,
-            item_name: true,
-          },
-        }),
+        insuranceItemIds.length === 0
+          ? Promise.resolve([] as Array<{ id: number; item_name: string }>)
+          : prisma.$queryRawUnsafe<Array<{ id: number; item_name: string }>>(
+              `
+                SELECT
+                  iim.id,
+                  CONCAT_WS(' ', NULLIF(TRIM(iisc.name), ''), NULLIF(TRIM(iim.name), '')) AS item_name
+                FROM insurance_item_masters iim
+                LEFT JOIN insurance_sub_categories iisc ON iisc.id = iim.sub_category_id
+                WHERE iim.id = ANY($1)
+              `,
+              insuranceItemIds
+            ),
         prisma.private_items.findMany({
           where: {
             id: {
@@ -281,9 +283,11 @@ export async function GET(request: NextRequest) {
         customer_name: customerNames.get(order.customer_id) ?? "未登録",
         patient_id: order.patient_id,
         patient_name: patientNames.get(order.patient_id) ?? "未登録",
-        work_type_name: hasInsuranceItem
-          ? insuranceNames.get(item.insurance_item_id as number) ?? "未登録"
-          : privateNames.get(item.private_item_id as number) ?? "未登録",
+        work_type_name:
+          item.work_name?.trim() ||
+          (hasInsuranceItem
+            ? insuranceNames.get(item.insurance_item_id as number) ?? "未登録"
+            : privateNames.get(item.private_item_id as number) ?? "未登録"),
         tooth_numbers: teethByOrderId.get(order.id) ?? [],
         delivery_date: order.delivery_date ? formatDate(order.delivery_date) : null,
         quantity,

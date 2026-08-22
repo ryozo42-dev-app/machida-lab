@@ -91,7 +91,14 @@ export async function GET() {
       insuranceItemIds.length === 0
         ? Promise.resolve([] as Array<{ id: number; name: string }>)
         : prisma.$queryRawUnsafe<Array<{ id: number; name: string }>>(
-            "SELECT id, name FROM insurance_item_masters WHERE id = ANY($1)",
+            `
+              SELECT
+                iim.id,
+                CONCAT_WS(' ', NULLIF(TRIM(iisc.name), ''), NULLIF(TRIM(iim.name), '')) AS name
+              FROM insurance_item_masters iim
+              LEFT JOIN insurance_sub_categories iisc ON iisc.id = iim.sub_category_id
+              WHERE iim.id = ANY($1)
+            `,
             insuranceItemIds
           ),
       prisma.private_items.findMany({
@@ -131,6 +138,12 @@ export async function GET() {
       const items = orderItems.filter((item) => item.order_id === order.id);
 
       const workTypes = items.flatMap((item) => {
+        const savedWorkName = item.work_name?.trim();
+
+        if (savedWorkName) {
+          return savedWorkName;
+        }
+
         if (item.insurance_item_id !== null) {
           return insuranceItemNames.get(item.insurance_item_id) ?? [];
         }
@@ -148,6 +161,7 @@ export async function GET() {
 
       const pdf = orderFiles.find((file) => file.order_id === order.id);
       const isBridge = bridgeByOrderId.get(order.id) ?? false;
+      const isBaseUpSupportTarget = items.some((item) => item.base_up_support_target);
 
       return {
         id: order.id,
@@ -165,6 +179,7 @@ export async function GET() {
         completed: order.work_status === "completed",
         pdfUrl: pdf ? `/works/files/${pdf.id}` : null,
         isBridge,
+        baseUpSupportTarget: isBaseUpSupportTarget,
       };
     });
 
