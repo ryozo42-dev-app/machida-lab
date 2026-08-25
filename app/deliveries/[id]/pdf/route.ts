@@ -24,9 +24,16 @@ type DeliveryPdfItem = {
   patient_name: string;
   work_type_name: string;
   teeth: DeliveryPdfTooth[];
+  used_materials: DeliveryPdfUsedMaterialItem[];
   quantity: number;
   unit_price: string;
   amount: string;
+};
+
+type DeliveryPdfUsedMaterialItem = {
+  label: string;
+  unit: string;
+  quantity: string;
 };
 
 type DeliveryPdfTooth = {
@@ -54,6 +61,16 @@ type DeliveryMaterialSummaryItem = {
   unit: string;
   used_quantity: string;
   remaining_quantity: string;
+};
+
+type DepositMaterialType = "para" | "miro";
+
+type DepositMaterialTransactionForPdf = {
+  order_item_id: number | null;
+  transaction_type: "deposit" | "use" | "use_reversal" | string;
+  quantity: string;
+  material_name: string;
+  unit: string;
 };
 
 function parsePositiveInteger(value: string) {
@@ -103,16 +120,16 @@ function formatMaterialQuantity(value: Prisma.Decimal | number) {
   }).format(Number(value));
 }
 
-function formatMaterialLabel(name: string) {
-  if (name.includes("ミロ")) {
-    return "ミロ";
-  }
-
+function toDepositMaterialType(name: string): DepositMaterialType | null {
   if (name.includes("パラ")) {
-    return "パラ";
+    return "para";
   }
 
-  return name;
+  if (name.includes("ミロ")) {
+    return "miro";
+  }
+
+  return null;
 }
 
 function formatPercent(value: Prisma.Decimal | null) {
@@ -482,8 +499,6 @@ async function fetchDeliveryPdfData(
     insuranceItems,
     privateItems,
     patients,
-    customerMaterials,
-    materialTransactions,
   ] = await Promise.all([
     prisma.customers.findUnique({
       where: { id: delivery.customer_id },
@@ -562,40 +577,34 @@ async function fetchDeliveryPdfData(
       },
     }),
 
-    prisma.customer_materials.findMany({
-      where: {
-        customer_id: delivery.customer_id,
-        is_active: true,
-        report_on_delivery: true,
-      },
-      select: {
-        id: true,
-        current_quantity: true,
-        materials: {
-          select: {
-            name: true,
-            unit: true,
-          },
-        },
-      },
-      orderBy: {
-        material_id: "asc",
-      },
-    }),
-
-    prisma.material_transactions.findMany({
-      where: {
-        order_id: {
-          in: orderIds,
-        },
-        transaction_type: "use",
-      },
-      select: {
-        customer_material_id: true,
-        quantity: true,
-      },
-    }),
   ]);
+
+  const depositMaterialTransactions =
+    customer?.show_material_on_delivery
+      ? await prisma.$queryRaw<DepositMaterialTransactionForPdf[]>`
+          SELECT
+            cdmt.order_item_id,
+            cdmt.transaction_type,
+            cdmt.quantity::text AS quantity,
+            m.name AS material_name,
+            m.unit
+          FROM customer_deposit_material_transactions cdmt
+          INNER JOIN customer_deposit_materials cdm
+            ON cdm.id = cdmt.deposit_material_id
+          INNER JOIN materials m
+            ON m.id = cdm.material_id
+          WHERE cdm.customer_id = ${delivery.customer_id}
+            AND cdmt.transaction_type IN (
+              'deposit',
+              'use',
+              'use_reversal'
+            )
+            AND (
+              m.name LIKE ${"%パラ%"}
+              OR m.name LIKE ${"%ミロ%"}
+            )
+        `
+      : [];
 
   const orderItemById = new Map(
     orderItems.map((item) => [item.id, item])
@@ -626,38 +635,103 @@ async function fetchDeliveryPdfData(
     ])
   );
 
-  const usedQuantityByCustomerMaterialId =
-    materialTransactions.reduce<
-      Map<number, Prisma.Decimal>
-    >((acc, transaction) => {
-      const current =
-        acc.get(transaction.customer_material_id) ??
-        new Prisma.Decimal(0);
+  const deliveryOrderItemIds = new Set(orderItemIds);
+  const materialTypes: DepositMaterialType[] = ["para", "miro"];
+  const materialLabels: Record<DepositMaterialType, string> = {
+    para: "パラ",
+    miro: "ミロ",
+  };
+  const unitsByMaterialType = new Map<DepositMaterialType, string>();
+  const remainingQuantityByMaterialType = new Map<
+    DepositMaterialType,
+    Prisma.Decimal
+  >();
+  const usedQuantityByOrderItemAndMaterial = new Map<
+    string,
+    Prisma.Decimal
+  >();
 
-      acc.set(
-        transaction.customer_material_id,
-        current.add(transaction.quantity)
+  for (const transaction of depositMaterialTransactions) {
+    const materialType = toDepositMaterialType(
+      transaction.material_name
+    );
+
+    if (materialType === null) {
+      continue;
+    }
+
+    unitsByMaterialType.set(materialType, transaction.unit);
+
+    const quantity = new Prisma.Decimal(transaction.quantity);
+    const currentRemaining =
+      remainingQuantityByMaterialType.get(materialType) ??
+      new Prisma.Decimal(0);
+
+    if (transaction.transaction_type === "deposit") {
+      remainingQuantityByMaterialType.set(
+        materialType,
+        currentRemaining.add(quantity)
       );
+    } else if (transaction.transaction_type === "use") {
+      remainingQuantityByMaterialType.set(
+        materialType,
+        currentRemaining.sub(quantity)
+      );
+    } else if (transaction.transaction_type === "use_reversal") {
+      remainingQuantityByMaterialType.set(
+        materialType,
+        currentRemaining.add(quantity)
+      );
+    }
 
-      return acc;
-    }, new Map<number, Prisma.Decimal>());
+    if (
+      transaction.order_item_id === null ||
+      !deliveryOrderItemIds.has(transaction.order_item_id)
+    ) {
+      continue;
+    }
+
+    const orderItemMaterialKey = `${transaction.order_item_id}:${materialType}`;
+    const currentUsed =
+      usedQuantityByOrderItemAndMaterial.get(orderItemMaterialKey) ??
+      new Prisma.Decimal(0);
+
+    if (transaction.transaction_type === "use") {
+      usedQuantityByOrderItemAndMaterial.set(
+        orderItemMaterialKey,
+        currentUsed.add(quantity)
+      );
+    } else if (transaction.transaction_type === "use_reversal") {
+      usedQuantityByOrderItemAndMaterial.set(
+        orderItemMaterialKey,
+        currentUsed.sub(quantity)
+      );
+    }
+  }
 
   const materialSummary =
     customer?.show_material_on_delivery
-      ? customerMaterials.map((item) => ({
-          label: formatMaterialLabel(
-            item.materials.name
-          ),
-          unit: item.materials.unit,
-          used_quantity: formatMaterialQuantity(
-            usedQuantityByCustomerMaterialId.get(
-              item.id
-            ) ?? new Prisma.Decimal(0)
-          ),
-          remaining_quantity: formatMaterialQuantity(
-            item.current_quantity
-          ),
-        }))
+      ? materialTypes.map((materialType) => {
+          const usedQuantity = orderItemIds.reduce(
+            (total, orderItemId) =>
+              total.add(
+                usedQuantityByOrderItemAndMaterial.get(
+                  `${orderItemId}:${materialType}`
+                ) ?? new Prisma.Decimal(0)
+              ),
+            new Prisma.Decimal(0)
+          );
+
+          return {
+            label: materialLabels[materialType],
+            unit: unitsByMaterialType.get(materialType) ?? "g",
+            used_quantity: formatMaterialQuantity(usedQuantity),
+            remaining_quantity: formatMaterialQuantity(
+              remainingQuantityByMaterialType.get(materialType) ??
+                new Prisma.Decimal(0)
+            ),
+          };
+        })
       : [];
 
   const teethByOrderId =
@@ -714,6 +788,28 @@ async function fetchDeliveryPdfData(
               orderItem.private_item_id as number
             ) ?? "未登録");
 
+      const usedMaterials = customer?.show_material_on_delivery
+        ? materialTypes.flatMap((materialType) => {
+            const quantity =
+              usedQuantityByOrderItemAndMaterial.get(
+                `${deliveryItem.order_item_id}:${materialType}`
+              ) ?? new Prisma.Decimal(0);
+
+            if (quantity.lte(0)) {
+              return [];
+            }
+
+            return [
+              {
+                label: materialLabels[materialType],
+                unit:
+                  unitsByMaterialType.get(materialType) ?? "g",
+                quantity: formatMaterialQuantity(quantity),
+              },
+            ];
+          })
+        : [];
+
       return {
         delivery_item_id: deliveryItem.id,
         order_item_id: deliveryItem.order_item_id,
@@ -724,6 +820,7 @@ async function fetchDeliveryPdfData(
         work_type_name: workTypeName,
         teeth:
           teethByOrderId.get(order.id) ?? [],
+        used_materials: usedMaterials,
         quantity: deliveryItem.quantity,
         unit_price: formatYen(
           deliveryItem.unit_price
@@ -813,6 +910,24 @@ function createDeliveryHtml(
           <td>${escapeHtml(item.work_type_name)}</td>
           <td class="tooth-cell">
             ${renderToothNumbersHtml(item.teeth)}
+          </td>
+          <td class="used-material-cell">
+            ${
+              item.used_materials.length > 0
+                ? item.used_materials
+                    .map(
+                      (material) => `
+                        <div>
+                          ${escapeHtml(material.label)}
+                          ${escapeHtml(material.quantity)}${escapeHtml(
+                            material.unit
+                          )}
+                        </div>
+                      `
+                    )
+                    .join("")
+                : "-"
+            }
           </td>
           <td class="quantity-cell">
             ${escapeHtml(String(item.quantity))}
@@ -1048,12 +1163,13 @@ function createDeliveryHtml(
        *
        * 列幅は colgroup で固定
        *
-       * 患者名    9%
-       * 作業内容 46%
-       * 部位     16%
-       * 数量      4%
-       * 単価    12.5%
-       * 金額    12.5%
+       * 患者名    15%
+       * 作業内容 31.5%
+       * 部位      20%
+       * 使用材料   9%
+       * 数量       5%
+       * 単価     9.75%
+       * 金額     9.75%
        * 合計    100%
        * =====================================================
        */
@@ -1106,13 +1222,29 @@ function createDeliveryHtml(
       }
 
       /*
-       * 数量
+       * 使用材料
        *
-       * colgroup側で4%に固定。
-       * 文字が広がって列幅を押し広げないようにする。
+       * 将来的に「パラ 1.5g」「ミロ 0.8g」を表示する。
        */
       .delivery-table th:nth-child(4),
       .delivery-table td:nth-child(4) {
+        text-align: center;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+
+      .delivery-table td.used-material-cell {
+        line-height: 1.5;
+      }
+
+      /*
+       * 数量
+       *
+       * 既存幅の5%を維持。
+       * 文字が広がって列幅を押し広げないようにする。
+       */
+      .delivery-table th:nth-child(5),
+      .delivery-table td:nth-child(5) {
         text-align: center;
         padding-left: 2px;
         padding-right: 2px;
@@ -1122,16 +1254,16 @@ function createDeliveryHtml(
       /*
        * 単価
        */
-      .delivery-table th:nth-child(5),
-      .delivery-table td:nth-child(5) {
+      .delivery-table th:nth-child(6),
+      .delivery-table td:nth-child(6) {
         text-align: right;
       }
 
       /*
        * 金額
        */
-      .delivery-table th:nth-child(6),
-      .delivery-table td:nth-child(6) {
+      .delivery-table th:nth-child(7),
+      .delivery-table td:nth-child(7) {
         text-align: right;
       }
 
@@ -1347,15 +1479,16 @@ function createDeliveryHtml(
 
         <!--
           列幅をここで完全固定
-          9% + 46% + 16% + 4% + 12.5% + 12.5% = 100%
+          15% + 31.5% + 20% + 9% + 5% + 9.75% + 9.75% = 100%
         -->
         <colgroup>
           <col style="width: 15%;" />
-          <col style="width: 35%;" />
+          <col style="width: 31.5%;" />
           <col style="width: 20%;" />
+          <col style="width: 9%;" />
           <col style="width: 5%;" />
-          <col style="width: 12.5%;" />
-          <col style="width: 12.5%;" />
+          <col style="width: 9.75%;" />
+          <col style="width: 9.75%;" />
         </colgroup>
 
         <thead>
@@ -1363,6 +1496,7 @@ function createDeliveryHtml(
             <th>患者名</th>
             <th>作業内容</th>
             <th>部位</th>
+            <th>使用材料</th>
             <th>数量</th>
             <th>単価</th>
             <th>金額</th>

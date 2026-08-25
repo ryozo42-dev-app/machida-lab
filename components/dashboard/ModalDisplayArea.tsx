@@ -123,6 +123,7 @@ function toFdiToothNumber(toothId: string) {
 
 type WorkRecord = {
   id: number;
+  orderItemId: number | null;
   orderNo: string;
   customerId: number;
   clinic: string;
@@ -1597,6 +1598,10 @@ function WorkInputModal() {
   const [records, setRecords] = useState<WorkRecord[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [expandedClinics, setExpandedClinics] = useState<Set<string>>(new Set());
+  const [depositMaterialType, setDepositMaterialType] = useState<"para" | "miro" | null>(null);
+  const [depositMaterialAmount, setDepositMaterialAmount] = useState("");
+  const [workInputError, setWorkInputError] = useState("");
+  const [isWorkStatusUpdating, setIsWorkStatusUpdating] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1661,22 +1666,85 @@ function WorkInputModal() {
     });
   };
 
+  const handleSelectWorkRecord = (recordId: number) => {
+    setSelectedId(recordId);
+    setDepositMaterialType(null);
+    setDepositMaterialAmount("");
+    setWorkInputError("");
+  };
+
   const updateWorkStatus = async (
     workStatus: "in_progress" | "completed"
   ) => {
-    if (selectedId === null) {
+    if (selectedId === null || !selectedRecord || isWorkStatusUpdating) {
       return;
     }
+
+    const depositMaterialUse =
+      workStatus === "completed"
+        ? (() => {
+            const hasMaterialType = depositMaterialType !== null;
+            const hasAmount = depositMaterialAmount.trim().length > 0;
+
+            if (!hasMaterialType && !hasAmount) {
+              return null;
+            }
+
+            if (!hasMaterialType || !hasAmount) {
+              setWorkInputError("預かり材料と使用量を両方入力してください");
+              return false;
+            }
+
+            const quantity = Number(depositMaterialAmount);
+
+            if (!Number.isFinite(quantity) || quantity <= 0) {
+              setWorkInputError("使用量は0より大きい数値を入力してください");
+              return false;
+            }
+
+            if (selectedRecord.orderItemId === null) {
+              setWorkInputError("作業項目を特定できないため、預かり材料を登録できません");
+              return false;
+            }
+
+            return {
+              material_type: depositMaterialType,
+              quantity,
+              order_item_id: selectedRecord.orderItemId,
+            };
+          })()
+        : null;
+
+    if (depositMaterialUse === false) {
+      return;
+    }
+
+    setWorkInputError("");
+    setIsWorkStatusUpdating(true);
 
     try {
       const response = await fetch(`/works/${selectedId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ work_status: workStatus }),
+        body: JSON.stringify({
+          work_status: workStatus,
+          ...(depositMaterialUse
+            ? { deposit_material_use: depositMaterialUse }
+            : {}),
+        }),
       });
 
       if (!response.ok) {
-        throw new Error("Failed to update work status");
+        const errorData: unknown = await response.json().catch(() => null);
+        const errorMessage =
+          typeof errorData === "object" &&
+          errorData !== null &&
+          "error" in errorData &&
+          typeof errorData.error === "string"
+            ? errorData.error
+            : "作業ステータスの更新に失敗しました";
+
+        throw new Error(errorMessage);
       }
 
       setRecords((currentRecords) =>
@@ -1690,8 +1758,17 @@ function WorkInputModal() {
             : record
         )
       );
+      setDepositMaterialType(null);
+      setDepositMaterialAmount("");
     } catch (error) {
       console.error(error);
+      setWorkInputError(
+        error instanceof Error
+          ? error.message
+          : "作業ステータスの更新に失敗しました"
+      );
+    } finally {
+      setIsWorkStatusUpdating(false);
     }
   };
 
@@ -1726,13 +1803,77 @@ function WorkInputModal() {
                   {selectedRecord.isBridge ? (
                     <span className="ml-1 inline-block rounded bg-[#FFF3A6] px-1.5 py-0.5 text-[11px] font-bold text-[#3B2D00]">【bridge】</span>
                   ) : null}
+                </p>
+                <p>
                   {selectedRecord.baseUpSupportTarget ? (
-                    <span className="mt-1 block">
-                      <span className="inline-block rounded bg-[#FFF3A6] px-1.5 py-0.5 text-[11px] font-bold text-[#3B2D00]">【ベースアップ支援金対象】</span>
-                    </span>
+                    <span className="inline-block rounded bg-[#FFF3A6] px-1.5 py-0.5 text-[11px] font-bold text-[#3B2D00]">【ベースアップ支援金対象】</span>
                   ) : null}
                 </p>
+                <div className="space-y-2 rounded-lg border border-[#EFEFEF] bg-[#FCFCFC] px-3 py-2">
+                  <p className="text-xs font-semibold text-[#555555]">預かり材料使用量</p>
+                  <div className="flex items-center gap-6">
+                    <label className="inline-flex items-center gap-1.5 text-sm font-medium text-[#333333]">
+                      <input
+                        type="radio"
+                        name="deposit-material-type"
+                        value="para"
+                        checked={depositMaterialType === "para"}
+                        onChange={() => setDepositMaterialType("para")}
+                        className="h-3.5 w-3.5 accent-[#E4A800]"
+                      />
+                      <span>パラ</span>
+                    </label>
+                    <label className="inline-flex items-center gap-1.5 text-sm font-medium text-[#333333]">
+                      <input
+                        type="radio"
+                        name="deposit-material-type"
+                        value="miro"
+                        checked={depositMaterialType === "miro"}
+                        onChange={() => setDepositMaterialType("miro")}
+                        className="h-3.5 w-3.5 accent-[#E4A800]"
+                      />
+                      <span>ミロ</span>
+                    </label>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-[#333333]">
+                    <span className="font-semibold text-[#555555]">使用量</span>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      inputMode="decimal"
+                      value={depositMaterialAmount}
+                      onChange={(event) => setDepositMaterialAmount(event.target.value)}
+                      className="h-8 w-24 rounded-lg border border-[#E2E2E2] bg-white px-2 text-sm text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
+                      aria-label="預かり材料使用量"
+                    />
+                    <span className="font-medium text-[#555555]">g</span>
+                  </label>
+                </div>
+                <div className="col-start-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void updateWorkStatus("in_progress")}
+                    disabled={!selectedRecord?.completed}
+                    className="rounded-lg border border-[#E1E1E1] bg-white px-5 py-2 text-sm font-semibold text-[#444444] transition-colors duration-200 ease-[ease] hover:bg-[#F8F8F8] disabled:cursor-not-allowed disabled:bg-[#F6F6F6] disabled:text-[#A5A5A5]"
+                  >
+                    作業中に戻す
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void updateWorkStatus("completed")}
+                    className="rounded-lg bg-[#fff362] px-5 py-2 text-sm font-bold text-[#222222] transition-colors duration-200 ease-[ease] hover:bg-[#fff362]"
+                  >
+                    作業終了
+                  </button>
+                </div>
               </div>
+
+              {workInputError ? (
+                <p className="mt-2 text-sm font-semibold text-[#C0392B]">
+                  {workInputError}
+                </p>
+              ) : null}
 
               <div className="mt-2 grid grid-cols-[110px_1fr] gap-3">
                 <button
@@ -1766,23 +1907,6 @@ function WorkInputModal() {
                 </div>
               </div>
 
-              <div className="mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => void updateWorkStatus("in_progress")}
-                  disabled={!selectedRecord?.completed}
-                  className="rounded-lg border border-[#E1E1E1] bg-white px-5 py-2 text-sm font-semibold text-[#444444] transition-colors duration-200 ease-[ease] hover:bg-[#F8F8F8] disabled:cursor-not-allowed disabled:bg-[#F6F6F6] disabled:text-[#A5A5A5]"
-                >
-                  作業中に戻す
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void updateWorkStatus("completed")}
-                  className="rounded-lg bg-[#fff362] px-5 py-2 text-sm font-bold text-[#222222] transition-colors duration-200 ease-[ease] hover:bg-[#fff362]"
-                >
-                  作業終了
-                </button>
-              </div>
             </div>
           ) : null}
         </div>
@@ -1819,7 +1943,7 @@ function WorkInputModal() {
                           <button
                             key={record.id}
                             type="button"
-                            onClick={() => setSelectedId(record.id)}
+                            onClick={() => handleSelectWorkRecord(record.id)}
                             className={`grid w-full grid-cols-[1fr_1fr_1fr_auto] items-center gap-3 border-b border-[#EFEFEF] px-3 py-2 text-left last:border-b-0 transition-colors duration-150 ease-[ease] ${
                               isSelected ? "bg-[#FFF8EA]" : "bg-transparent hover:bg-[#FFFDF7]"
                             } ${record.completed ? "text-[#9AA0AA]" : "text-[#2A2A2A]"}`}

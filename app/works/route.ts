@@ -165,6 +165,7 @@ export async function GET() {
 
       return {
         id: order.id,
+        orderItemId: items[0]?.id ?? null,
         orderNo: order.order_no ?? "",
         customerId: order.customer_id,
         clinic: customerNames.get(order.customer_id) ?? "未登録",
