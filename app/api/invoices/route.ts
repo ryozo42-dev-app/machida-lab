@@ -526,19 +526,26 @@ export async function POST(request: NextRequest) {
             select: {
               order_id: true,
               tooth_no: true,
+              is_bridge: true,
             },
           });
 
         const teethByOrderId = new Map<
           number,
-          string[]
+          Array<{
+            tooth_no: string;
+            is_bridge: boolean;
+          }>
         >();
 
         for (const tooth of orderTeeth) {
           const current =
             teethByOrderId.get(tooth.order_id) ?? [];
 
-          current.push(tooth.tooth_no);
+          current.push({
+            tooth_no: tooth.tooth_no,
+            is_bridge: tooth.is_bridge,
+          });
 
           teethByOrderId.set(
             tooth.order_id,
@@ -791,7 +798,22 @@ export async function POST(request: NextRequest) {
          * 請求明細スナップショット作成
          * --------------------------------------------------
          */
-        const invoiceItemRows = deliveryItems.map(
+        type InvoiceItemRow = {
+          delivery_id: number;
+          order_item_id: number | null;
+          delivery_date: Date;
+          patient_name: string;
+          work_name: string;
+          tooth_display: string | null;
+          tooth_snapshot: Prisma.InputJsonValue | null;
+          material_usage_text: string | null;
+          quantity: number;
+          unit_price: Prisma.Decimal;
+          amount: Prisma.Decimal;
+          sort_order: number;
+        };
+
+        const invoiceItemRows: InvoiceItemRow[] = deliveryItems.map(
           (deliveryItem, index) => {
             const orderItem = orderItemById.get(
               deliveryItem.order_item_id
@@ -841,8 +863,12 @@ export async function POST(request: NextRequest) {
 
             const toothDisplay =
               createToothDisplay(
-                teethByOrderId.get(order.id) ?? []
+                (teethByOrderId.get(order.id) ?? []).map(
+                  (tooth) => tooth.tooth_no
+                )
               );
+            const toothSnapshot =
+              teethByOrderId.get(order.id) ?? [];
 
             const materialUsage =
               materialUsageByOrderItemId.get(
@@ -881,6 +907,11 @@ export async function POST(request: NextRequest) {
               tooth_display:
                 toothDisplay || null,
 
+              tooth_snapshot:
+                toothSnapshot.length > 0
+                  ? toothSnapshot
+                  : null,
+
               material_usage_text:
                 materialUsageText || null,
 
@@ -898,6 +929,46 @@ export async function POST(request: NextRequest) {
         );
 
         /*
+         * ベースアップ支援金
+         *
+         * 136円 × 対象数量を、通常明細と同じ請求明細行として扱う。
+         */
+        const baseUpSupportQuantity =
+          orderItems.reduce((total, orderItem) => {
+            if (!orderItem.base_up_support_target) {
+              return total;
+            }
+
+            return total + (orderItem.quantity ?? 1);
+          }, 0);
+
+        const baseUpSupportAmount = new Prisma.Decimal(
+          BASE_UP_SUPPORT_AMOUNT_PER_ITEM
+        ).mul(baseUpSupportQuantity);
+
+        if (baseUpSupportQuantity > 0) {
+          const lastDelivery =
+            deliveries[deliveries.length - 1];
+
+          invoiceItemRows.push({
+            delivery_id: lastDelivery.id,
+            order_item_id: null,
+            delivery_date: lastDelivery.delivery_date,
+            patient_name: "",
+            work_name: "BUS",
+            tooth_display: null,
+            tooth_snapshot: null,
+            material_usage_text: null,
+            quantity: baseUpSupportQuantity,
+            unit_price: new Prisma.Decimal(
+              BASE_UP_SUPPORT_AMOUNT_PER_ITEM
+            ),
+            amount: baseUpSupportAmount,
+            sort_order: invoiceItemRows.length,
+          });
+        }
+
+        /*
          * --------------------------------------------------
          * 金額集計
          * --------------------------------------------------
@@ -909,43 +980,16 @@ export async function POST(request: NextRequest) {
             new Prisma.Decimal(0)
           );
 
-        const taxAmount =
-          deliveries.reduce(
-            (total, delivery) =>
-              total.add(
-                delivery.tax_amount ??
-                  new Prisma.Decimal(0)
-              ),
-            new Prisma.Decimal(0)
-          );
-
-        /*
-         * ベースアップ支援金
-         *
-         * 現在の納品書と同じルール：
-         * 136円 × 対象数量
-         */
-        const baseUpSupportAmount =
-          orderItems.reduce(
-            (total, orderItem) => {
-              if (
-                !orderItem.base_up_support_target
-              ) {
-                return total;
-              }
-
-              return (
-                total +
-                BASE_UP_SUPPORT_AMOUNT_PER_ITEM *
-                  (orderItem.quantity ?? 1)
-              );
-            },
-            0
+        const taxAmount = subtotal
+          .mul(taxRate)
+          .div(100)
+          .toDecimalPlaces(
+            0,
+            Prisma.Decimal.ROUND_HALF_UP
           );
 
         const totalAmount = subtotal
-          .add(taxAmount)
-          .add(baseUpSupportAmount);
+          .add(taxAmount);
 
         /*
          * --------------------------------------------------
@@ -1012,9 +1056,7 @@ export async function POST(request: NextRequest) {
               tax_amount: taxAmount,
 
               base_up_support_amount:
-                new Prisma.Decimal(
-                  baseUpSupportAmount
-                ),
+                baseUpSupportAmount,
 
               total_amount: totalAmount,
 
@@ -1061,6 +1103,9 @@ export async function POST(request: NextRequest) {
 
             tooth_display:
               item.tooth_display,
+
+            tooth_snapshot:
+              item.tooth_snapshot ?? Prisma.JsonNull,
 
             material_usage_text:
               item.material_usage_text,

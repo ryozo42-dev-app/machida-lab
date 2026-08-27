@@ -319,6 +319,7 @@ model invoice_items {
   patient_name        String       @db.VarChar(255)
   work_name           String       @db.VarChar(500)
   tooth_display       String?      @db.VarChar(255)
+  tooth_snapshot      Json?        @db.JsonB
   material_usage_text String?      @db.VarChar(255)
   quantity            Int          @default(1)
   unit_price          Decimal      @db.Decimal(12, 2)
