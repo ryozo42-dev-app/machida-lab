@@ -24,28 +24,31 @@ model customer_private_prices {
 }
 
 model customers {
-  id                        Int       @id @default(autoincrement())
-  code                      String    @unique @db.VarChar(20)
-  name                      String    @db.VarChar(100)
-  billing_closing_day       Int?
-  billing_closing_month_end Boolean   @default(false)
-  billing_issue_day         Int?
-  billing_issue_month_end   Boolean   @default(false)
-  show_material_on_delivery Boolean   @default(false)
-  created_at                DateTime? @default(now()) @db.Timestamp(6)
+  id                         Int                          @id @default(autoincrement())
+  code                       String                       @unique @db.VarChar(20)
+  name                       String                       @db.VarChar(100)
+  created_at                 DateTime?                    @default(now()) @db.Timestamp(6)
+  billing_closing_day        Int?
+  billing_closing_month_end  Boolean                      @default(false)
+  billing_issue_day          Int?
+  show_material_on_delivery  Boolean                      @default(false)
+  billing_issue_month_end    Boolean                      @default(false)
+  customer_deposit_materials customer_deposit_materials[]
 }
 
 model deliveries {
-  id                         Int              @id @default(autoincrement())
-  delivery_no                String?          @db.VarChar(50)
+  id                         Int                 @id @default(autoincrement())
+  delivery_no                String?             @db.VarChar(50)
   customer_id                Int
-  delivery_date              DateTime         @db.Date
-  total_amount               Decimal?         @db.Decimal(12, 2)
-  created_at                 DateTime?        @default(now()) @db.Timestamp(6)
-  tax_amount                 Decimal?         @db.Decimal(12, 2)
-  tax_rate                   Decimal?         @db.Decimal(5, 2)
-  total_amount_including_tax Decimal?         @db.Decimal(12, 2)
+  delivery_date              DateTime            @db.Date
+  total_amount               Decimal?            @db.Decimal(12, 2)
+  created_at                 DateTime?           @default(now()) @db.Timestamp(6)
+  tax_amount                 Decimal?            @db.Decimal(12, 2)
+  tax_rate                   Decimal?            @db.Decimal(5, 2)
+  total_amount_including_tax Decimal?            @db.Decimal(12, 2)
   delivery_items             delivery_items[]
+  invoice_deliveries         invoice_deliveries?
+  invoice_items              invoice_items[]
 }
 
 model TaxRate {
@@ -74,17 +77,27 @@ model delivery_items {
 }
 
 model invoices {
-  id           Int       @id @default(autoincrement())
-  invoice_no   String?   @db.VarChar(50)
-  customer_id  Int
-  closing_date DateTime? @db.Date
-  invoice_date DateTime? @db.Date
-  subtotal     Decimal?  @db.Decimal(12, 2)
-  tax_rate     Decimal?  @db.Decimal(5, 2)
-  tax_amount   Decimal?  @db.Decimal(12, 2)
-  total_amount Decimal?  @db.Decimal(12, 2)
-  paid         Boolean?  @default(false)
-  created_at   DateTime? @default(now()) @db.Timestamp(6)
+  id                     Int                  @id @default(autoincrement())
+  invoice_no             String?              @db.VarChar(50)
+  customer_id            Int
+  closing_date           DateTime?            @db.Date
+  invoice_date           DateTime?            @db.Date
+  subtotal               Decimal?             @db.Decimal(12, 2)
+  tax_rate               Decimal?             @db.Decimal(5, 2)
+  tax_amount             Decimal?             @db.Decimal(12, 2)
+  total_amount           Decimal?             @db.Decimal(12, 2)
+  paid                   Boolean?             @default(false)
+  created_at             DateTime?            @default(now()) @db.Timestamp(6)
+  period_start           DateTime?            @db.Date
+  period_end             DateTime?            @db.Date
+  base_up_support_amount Decimal              @default(0) @db.Decimal(12, 2)
+  display_invoice_no     String?              @db.VarChar(50)
+  updated_at             DateTime             @default(now()) @db.Timestamp(6)
+  invoice_deliveries     invoice_deliveries[]
+  invoice_items          invoice_items[]
+
+  @@index([customer_id], map: "idx_invoices_customer_id")
+  @@index([period_start, period_end], map: "idx_invoices_period")
 }
 
 model order_files {
@@ -96,38 +109,41 @@ model order_files {
 }
 
 model order_items {
-  id                Int             @id @default(autoincrement())
-  order_id          Int
-  insurance_item_id Int?
-  private_item_id   Int?
-  work_name         String?         @db.VarChar(400)
-  quantity          Int?            @default(1)
-  base_up_support_target Boolean   @default(false)
-  unit_price        Decimal?        @db.Decimal(10, 2)
-  created_at        DateTime?       @default(now()) @db.Timestamp(6)
-  delivery_items    delivery_items?
+  id                                     Int                                      @id @default(autoincrement())
+  order_id                               Int
+  insurance_item_id                      Int?
+  private_item_id                        Int?
+  quantity                               Int?                                     @default(1)
+  unit_price                             Decimal?                                 @db.Decimal(10, 2)
+  created_at                             DateTime?                                @default(now()) @db.Timestamp(6)
+  work_name                              String?                                  @db.VarChar(400)
+  base_up_support_target                 Boolean                                  @default(false)
+  customer_deposit_material_transactions customer_deposit_material_transactions[]
+  delivery_items                         delivery_items?
+  invoice_items                          invoice_items[]
 }
 
 model order_teeth {
   id         Int       @id @default(autoincrement())
   order_id   Int
   tooth_no   String    @db.VarChar(10)
-  is_bridge  Boolean   @default(false)
   created_at DateTime? @default(now()) @db.Timestamp(6)
+  is_bridge  Boolean   @default(false)
 }
 
 model orders {
-  id             Int       @id @default(autoincrement())
-  order_no       String?   @db.VarChar(50)
-  customer_id    Int
-  patient_id     Int
-  order_date     DateTime  @db.Date
-  delivery_date  DateTime? @db.Date
-  insurance_type String?   @db.VarChar(20)
-  remarks        String?
-  billed         Boolean?  @default(false)
-  created_at     DateTime? @default(now()) @db.Timestamp(6)
-  work_status    String    @default("pending") @db.VarChar(20)
+  id                                     Int                                      @id @default(autoincrement())
+  order_no                               String?                                  @db.VarChar(50)
+  customer_id                            Int
+  patient_id                             Int
+  order_date                             DateTime                                 @db.Date
+  delivery_date                          DateTime?                                @db.Date
+  insurance_type                         String?                                  @db.VarChar(20)
+  remarks                                String?
+  billed                                 Boolean?                                 @default(false)
+  created_at                             DateTime?                                @default(now()) @db.Timestamp(6)
+  work_status                            String                                   @default("pending") @db.VarChar(20)
+  customer_deposit_material_transactions customer_deposit_material_transactions[]
 }
 
 model patients {
@@ -161,13 +177,14 @@ model users {
 }
 
 model materials {
-  id                 Int                  @id @default(autoincrement())
-  name               String               @db.VarChar(100)
-  unit               String               @db.VarChar(20)
-  is_active          Boolean              @default(true)
-  created_at         DateTime?            @default(now()) @db.Timestamp(6)
-  updated_at         DateTime?            @updatedAt @db.Timestamp(6)
-  customer_materials customer_materials[]
+  id                         Int                          @id @default(autoincrement())
+  name                       String                       @db.VarChar(100)
+  unit                       String                       @db.VarChar(20)
+  is_active                  Boolean                      @default(true)
+  created_at                 DateTime?                    @default(now()) @db.Timestamp(6)
+  updated_at                 DateTime?                    @updatedAt @db.Timestamp(6)
+  customer_deposit_materials customer_deposit_materials[]
+  customer_materials         customer_materials[]
 }
 
 model customer_materials {
@@ -177,8 +194,8 @@ model customer_materials {
   current_quantity      Decimal                 @default(0) @db.Decimal(10, 3)
   report_on_delivery    Boolean                 @default(false)
   is_active             Boolean                 @default(true)
-  created_at             DateTime?               @default(now()) @db.Timestamp(6)
-  updated_at             DateTime?               @updatedAt @db.Timestamp(6)
+  created_at            DateTime?               @default(now()) @db.Timestamp(6)
+  updated_at            DateTime?               @updatedAt @db.Timestamp(6)
   materials             materials               @relation(fields: [material_id], references: [id])
   material_transactions material_transactions[]
 
@@ -198,4 +215,121 @@ model material_transactions {
 
   @@index([customer_material_id])
   @@index([order_id])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model customer_deposit_material_transactions {
+  id                         Int                        @id @default(autoincrement())
+  deposit_material_id        Int
+  transaction_type           String                     @db.VarChar(20)
+  quantity                   Decimal                    @db.Decimal(12, 3)
+  order_id                   Int?
+  order_item_id              Int?
+  created_at                 DateTime                   @default(now()) @db.Timestamp(6)
+  customer_deposit_materials customer_deposit_materials @relation(fields: [deposit_material_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_deposit_material_transactions_material")
+  orders                     orders?                    @relation(fields: [order_id], references: [id], onUpdate: NoAction, map: "fk_deposit_material_transactions_order")
+  order_items                order_items?               @relation(fields: [order_item_id], references: [id], onUpdate: NoAction, map: "fk_deposit_material_transactions_order_item")
+
+  @@index([created_at], map: "idx_deposit_material_transactions_created_at")
+  @@index([deposit_material_id], map: "idx_deposit_material_transactions_material")
+  @@index([order_id], map: "idx_deposit_material_transactions_order")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model customer_deposit_materials {
+  id                                     Int                                      @id @default(autoincrement())
+  customer_id                            Int
+  material_id                            Int
+  current_quantity                       Decimal                                  @default(0) @db.Decimal(12, 3)
+  created_at                             DateTime                                 @default(now()) @db.Timestamp(6)
+  updated_at                             DateTime                                 @default(now()) @db.Timestamp(6)
+  customer_deposit_material_transactions customer_deposit_material_transactions[]
+  customers                              customers                                @relation(fields: [customer_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_customer_deposit_materials_customer")
+  materials                              materials                                @relation(fields: [material_id], references: [id], onUpdate: NoAction, map: "fk_customer_deposit_materials_material")
+
+  @@unique([customer_id, material_id], map: "uq_customer_deposit_materials")
+  @@index([customer_id], map: "idx_customer_deposit_materials_customer")
+}
+
+model insurance_categories {
+  id                       Int                        @id @default(autoincrement())
+  name                     String                     @unique @db.VarChar(100)
+  sort_order               Int                        @default(0)
+  is_active                Boolean                    @default(true)
+  created_at               DateTime?                  @default(now()) @db.Timestamp(6)
+  insurance_sub_categories insurance_sub_categories[]
+}
+
+model insurance_item_masters {
+  id                       Int                      @id @default(autoincrement())
+  sub_category_id          Int
+  name                     String                   @db.VarChar(200)
+  sort_order               Int                      @default(0)
+  is_active                Boolean                  @default(true)
+  created_at               DateTime?                @default(now()) @db.Timestamp(6)
+  insurance_sub_categories insurance_sub_categories @relation(fields: [sub_category_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_insurance_item_masters_sub_category")
+
+  @@unique([sub_category_id, name], map: "uq_insurance_item_masters")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model insurance_items_backup_20260818 {
+  id         Int?
+  category   String?   @db.VarChar(100)
+  item_name  String?   @db.VarChar(200)
+  material   String?   @db.VarChar(100)
+  points     Decimal?  @db.Decimal(10, 2)
+  created_at DateTime? @db.Timestamp(6)
+  sub_type   String?   @db.VarChar(200)
+
+  @@ignore
+}
+
+model insurance_sub_categories {
+  id                     Int                      @id @default(autoincrement())
+  category_id            Int
+  name                   String                   @db.VarChar(100)
+  sort_order             Int                      @default(0)
+  is_active              Boolean                  @default(true)
+  created_at             DateTime?                @default(now()) @db.Timestamp(6)
+  insurance_item_masters insurance_item_masters[]
+  insurance_categories   insurance_categories     @relation(fields: [category_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_insurance_sub_categories_category")
+
+  @@unique([category_id, name], map: "uq_insurance_sub_categories")
+}
+
+model invoice_deliveries {
+  id          Int        @id @default(autoincrement())
+  invoice_id  Int
+  delivery_id Int        @unique(map: "uq_invoice_deliveries_delivery")
+  created_at  DateTime   @default(now()) @db.Timestamp(6)
+  deliveries  deliveries @relation(fields: [delivery_id], references: [id], onUpdate: NoAction, map: "fk_invoice_deliveries_delivery")
+  invoices    invoices   @relation(fields: [invoice_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_invoice_deliveries_invoice")
+
+  @@index([invoice_id], map: "idx_invoice_deliveries_invoice_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model invoice_items {
+  id                  Int          @id @default(autoincrement())
+  invoice_id          Int
+  delivery_id         Int
+  order_item_id       Int?
+  delivery_date       DateTime     @db.Date
+  patient_name        String       @db.VarChar(255)
+  work_name           String       @db.VarChar(500)
+  tooth_display       String?      @db.VarChar(255)
+  material_usage_text String?      @db.VarChar(255)
+  quantity            Int          @default(1)
+  unit_price          Decimal      @db.Decimal(12, 2)
+  amount              Decimal      @db.Decimal(12, 2)
+  sort_order          Int          @default(0)
+  created_at          DateTime     @default(now()) @db.Timestamp(6)
+  deliveries          deliveries   @relation(fields: [delivery_id], references: [id], onUpdate: NoAction, map: "fk_invoice_items_delivery")
+  invoices            invoices     @relation(fields: [invoice_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_invoice_items_invoice")
+  order_items         order_items? @relation(fields: [order_item_id], references: [id], onUpdate: NoAction, map: "fk_invoice_items_order_item")
+
+  @@index([invoice_id, delivery_date, sort_order], map: "idx_invoice_items_delivery_date")
+  @@index([delivery_id], map: "idx_invoice_items_delivery_id")
+  @@index([invoice_id], map: "idx_invoice_items_invoice_id")
 }

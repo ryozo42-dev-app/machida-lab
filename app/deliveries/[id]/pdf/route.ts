@@ -41,18 +41,21 @@ type DeliveryPdfTooth = {
   is_bridge: boolean;
 };
 
+type DeliveryPdfTotalSummary = {
+  total_amount: string;
+  tax_rate: Prisma.Decimal | null;
+  tax_amount: Prisma.Decimal | null;
+  total_amount_including_tax: Prisma.Decimal | null;
+};
+
 type DeliveryPdfData = {
   id: number;
   delivery_no: string;
   customer_name: string;
   delivery_date: string;
   material_summary: DeliveryMaterialSummaryItem[];
-  total_amount: string;
-  tax_rate: Prisma.Decimal | null;
-  tax_amount: Prisma.Decimal | null;
-  total_amount_including_tax: Prisma.Decimal | null;
-  total_amount_with_base_up_support: string;
-  base_up_support_amount: string | null;
+  deposit_summary: DeliveryDepositSummaryItem[];
+  total_summary: DeliveryPdfTotalSummary;
   items: DeliveryPdfItem[];
 };
 
@@ -63,6 +66,13 @@ type DeliveryMaterialSummaryItem = {
   remaining_quantity: string;
 };
 
+type DeliveryDepositSummaryItem = {
+  label: string;
+  unit: string;
+  quantity: string;
+  date: string;
+};
+
 type DepositMaterialType = "para" | "miro";
 
 type DepositMaterialTransactionForPdf = {
@@ -71,6 +81,7 @@ type DepositMaterialTransactionForPdf = {
   quantity: string;
   material_name: string;
   unit: string;
+  created_at: Date;
 };
 
 function parsePositiveInteger(value: string) {
@@ -98,6 +109,20 @@ function formatDate(date: Date, separator = "/") {
   return `${values.year}${separator}${values.month}${separator}${values.day}`;
 }
 
+function formatShortDate(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tokyo",
+    month: "numeric",
+    day: "numeric",
+  }).formatToParts(date);
+
+  const values = Object.fromEntries(
+    parts.map((part) => [part.type, part.value])
+  );
+
+  return `${values.month}/${values.day}`;
+}
+
 function formatYen(value: Prisma.Decimal | null) {
   if (value === null) {
     return "-";
@@ -110,14 +135,16 @@ function formatYen(value: Prisma.Decimal | null) {
   }).format(Number(value));
 }
 
-function formatPlainYen(value: number) {
-  return `${new Intl.NumberFormat("ja-JP").format(value)}円`;
-}
-
 function formatMaterialQuantity(value: Prisma.Decimal | number) {
   return new Intl.NumberFormat("ja-JP", {
     maximumFractionDigits: 3,
   }).format(Number(value));
+}
+
+function createNextDate(date: Date) {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + 1);
+  return nextDate;
 }
 
 function toDepositMaterialType(name: string): DepositMaterialType | null {
@@ -587,7 +614,8 @@ async function fetchDeliveryPdfData(
             cdmt.transaction_type,
             cdmt.quantity::text AS quantity,
             m.name AS material_name,
-            m.unit
+            m.unit,
+            cdmt.created_at
           FROM customer_deposit_material_transactions cdmt
           INNER JOIN customer_deposit_materials cdm
             ON cdm.id = cdmt.deposit_material_id
@@ -599,12 +627,32 @@ async function fetchDeliveryPdfData(
               'use',
               'use_reversal'
             )
+            AND cdmt.created_at < ${createNextDate(delivery.delivery_date)}
             AND (
               m.name LIKE ${"%パラ%"}
               OR m.name LIKE ${"%ミロ%"}
             )
+          ORDER BY cdmt.created_at ASC
         `
       : [];
+
+  const previousDelivery =
+    customer?.show_material_on_delivery
+      ? await prisma.deliveries.findFirst({
+          where: {
+            customer_id: delivery.customer_id,
+            delivery_date: {
+              lt: delivery.delivery_date,
+            },
+          },
+          orderBy: {
+            delivery_date: "desc",
+          },
+          select: {
+            delivery_date: true,
+          },
+        })
+      : null;
 
   const orderItemById = new Map(
     orderItems.map((item) => [item.id, item])
@@ -646,10 +694,26 @@ async function fetchDeliveryPdfData(
     DepositMaterialType,
     Prisma.Decimal
   >();
+  const depositedQuantityByDateAndMaterial = new Map<
+    string,
+    {
+      date: Date;
+      materialType: DepositMaterialType;
+      label: string;
+      unit: string;
+      quantity: Prisma.Decimal;
+    }
+  >();
   const usedQuantityByOrderItemAndMaterial = new Map<
     string,
     Prisma.Decimal
   >();
+  const deliveryDate = delivery.delivery_date;
+  const nextDeliveryDate = createNextDate(deliveryDate);
+  const depositSummaryStartDate =
+    previousDelivery === null
+      ? null
+      : createNextDate(previousDelivery.delivery_date);
 
   for (const transaction of depositMaterialTransactions) {
     const materialType = toDepositMaterialType(
@@ -672,6 +736,40 @@ async function fetchDeliveryPdfData(
         materialType,
         currentRemaining.add(quantity)
       );
+
+      if (transaction.created_at < nextDeliveryDate) {
+        const isAfterPreviousDelivery =
+          depositSummaryStartDate === null ||
+          transaction.created_at >= depositSummaryStartDate;
+
+        if (isAfterPreviousDelivery) {
+          const depositDateKey = formatDate(
+            transaction.created_at,
+            "-"
+          );
+          const depositSummaryKey = `${depositDateKey}:${materialType}`;
+          const currentDepositSummary =
+            depositedQuantityByDateAndMaterial.get(
+              depositSummaryKey
+            );
+
+          depositedQuantityByDateAndMaterial.set(
+            depositSummaryKey,
+            {
+              date:
+                currentDepositSummary?.date ??
+                transaction.created_at,
+              materialType,
+              label: materialLabels[materialType],
+              unit: transaction.unit,
+              quantity: (
+                currentDepositSummary?.quantity ??
+                new Prisma.Decimal(0)
+              ).add(quantity),
+            }
+          );
+        }
+      }
     } else if (transaction.transaction_type === "use") {
       remainingQuantityByMaterialType.set(
         materialType,
@@ -732,6 +830,30 @@ async function fetchDeliveryPdfData(
             ),
           };
         })
+      : [];
+
+  const depositSummary =
+    customer?.show_material_on_delivery
+      ? [...depositedQuantityByDateAndMaterial.values()]
+          .sort((first, second) => {
+            const dateDiff =
+              first.date.getTime() - second.date.getTime();
+
+            if (dateDiff !== 0) {
+              return dateDiff;
+            }
+
+            return (
+              materialTypes.indexOf(first.materialType) -
+              materialTypes.indexOf(second.materialType)
+            );
+          })
+          .map((item) => ({
+            label: item.label,
+            unit: item.unit,
+            quantity: formatMaterialQuantity(item.quantity),
+            date: formatShortDate(item.date),
+          }))
       : [];
 
   const teethByOrderId =
@@ -833,26 +955,55 @@ async function fetchDeliveryPdfData(
   );
 
   const totalAmount =
-    delivery.total_amount ?? null;
+    delivery.total_amount ?? new Prisma.Decimal(0);
 
-  const baseUpSupportAmount =
+  const baseUpSupportQuantity =
     orderItems.reduce((total, orderItem) => {
       if (!orderItem.base_up_support_target) {
         return total;
       }
 
-      return (
-        total +
-        BASE_UP_SUPPORT_AMOUNT_PER_ITEM *
-          (orderItem.quantity ?? 1)
-      );
+      return total + (orderItem.quantity ?? 1);
     }, 0);
 
-  const totalAmountWithBaseUpSupport = (
-    delivery.total_amount_including_tax ??
-    totalAmount ??
-    new Prisma.Decimal(0)
-  ).add(baseUpSupportAmount);
+  const baseUpSupportAmount = new Prisma.Decimal(
+    BASE_UP_SUPPORT_AMOUNT_PER_ITEM
+  ).mul(baseUpSupportQuantity);
+
+  if (baseUpSupportQuantity > 0) {
+    items.push({
+      delivery_item_id: 0,
+      order_item_id: 0,
+      patient_name: "",
+      work_type_name: "BUS",
+      teeth: [],
+      used_materials: [],
+      quantity: baseUpSupportQuantity,
+      unit_price: formatYen(
+        new Prisma.Decimal(BASE_UP_SUPPORT_AMOUNT_PER_ITEM)
+      ),
+      amount: formatYen(baseUpSupportAmount),
+    });
+  }
+
+  const totalAmountIncludingBaseUpSupport =
+    totalAmount.add(baseUpSupportAmount);
+
+  const taxAmount =
+    delivery.tax_rate === null
+      ? null
+      : totalAmountIncludingBaseUpSupport
+          .mul(delivery.tax_rate)
+          .div(100)
+          .toDecimalPlaces(
+            0,
+            Prisma.Decimal.ROUND_HALF_UP
+          );
+
+  const totalAmountIncludingTax =
+    taxAmount === null
+      ? null
+      : totalAmountIncludingBaseUpSupport.add(taxAmount);
 
   return {
     id: delivery.id,
@@ -864,19 +1015,16 @@ async function fetchDeliveryPdfData(
       "-"
     ),
     material_summary: materialSummary,
-    total_amount: formatYen(totalAmount),
-    tax_rate: delivery.tax_rate,
-    tax_amount: delivery.tax_amount,
-    total_amount_including_tax:
-      delivery.total_amount_including_tax,
-    total_amount_with_base_up_support:
-      formatYen(totalAmountWithBaseUpSupport),
-    base_up_support_amount:
-      baseUpSupportAmount > 0
-        ? formatPlainYen(
-            baseUpSupportAmount
-          )
-        : null,
+    deposit_summary: depositSummary,
+    total_summary: {
+      total_amount: formatYen(
+        totalAmountIncludingBaseUpSupport
+      ),
+      tax_rate: delivery.tax_rate,
+      tax_amount: taxAmount,
+      total_amount_including_tax:
+        totalAmountIncludingTax,
+    },
     items,
   };
 }
@@ -944,20 +1092,26 @@ function createDeliveryHtml(
     .join("");
 
   const hasTaxSummary =
-    data.tax_rate !== null &&
-    data.tax_amount !== null &&
-    data.total_amount_including_tax !== null;
+    data.total_summary.tax_rate !== null &&
+    data.total_summary.tax_amount !== null &&
+    data.total_summary.total_amount_including_tax !== null;
 
-  const baseUpSupportHtml =
-    data.base_up_support_amount
-      ? `
-        <div class="total-row">
-          <span>ベースアップ支援金</span>
-          <span>${escapeHtml(
-            data.base_up_support_amount
-          )}</span>
-        </div>
-      `
+  const depositSummaryHtml =
+    data.deposit_summary.length > 0
+      ? data.deposit_summary
+          .map(
+            (item) => `
+              <div class="overview-material-row">
+                <span>
+                  ${escapeHtml(item.date)}
+                  ${escapeHtml(item.label)}${escapeHtml(
+                    item.quantity
+                  )}${escapeHtml(item.unit)}預かり
+                </span>
+              </div>
+            `
+          )
+          .join("")
       : "";
 
   const materialSummaryHtml =
@@ -989,14 +1143,14 @@ function createDeliveryHtml(
 
   const totalHtml = hasTaxSummary
     ? (() => {
-        const taxRate = data.tax_rate;
-        const taxAmount = data.tax_amount;
+        const taxRate = data.total_summary.tax_rate;
+        const taxAmount = data.total_summary.tax_amount;
 
         return `
           <div class="total-row">
             <span>合計金額（税抜）</span>
             <span>${escapeHtml(
-              data.total_amount
+              data.total_summary.total_amount
             )}</span>
           </div>
 
@@ -1014,25 +1168,24 @@ function createDeliveryHtml(
             )}</span>
           </div>
 
-          ${baseUpSupportHtml}
-
           <div class="total-divider"></div>
 
           <div class="total-row total-row-grand">
             <span>合計金額（税込）</span>
             <span>${escapeHtml(
-              data.total_amount_with_base_up_support
+              formatYen(
+                data.total_summary
+                  .total_amount_including_tax
+              )
             )}</span>
           </div>
         `;
       })()
     : `
-        ${baseUpSupportHtml}
-
         <div class="total-row total-row-grand">
           <span>合計金額</span>
           <span>${escapeHtml(
-            data.total_amount_with_base_up_support
+            data.total_summary.total_amount
           )}</span>
         </div>
       `;
@@ -1469,6 +1622,7 @@ function createDeliveryHtml(
           <div>
             TEL/FAX：06-7504-6229
           </div>
+          <div>T8810900908573</div>
         </section>
 
       </header>
@@ -1516,6 +1670,7 @@ function createDeliveryHtml(
             概要
           </div>
 
+          ${depositSummaryHtml}
           ${materialSummaryHtml}
         </section>
 
