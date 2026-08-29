@@ -19,6 +19,7 @@
 
 # production
 /build
+/storage/
 /storage/order-files/
 
 # misc

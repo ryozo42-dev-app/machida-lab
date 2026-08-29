@@ -57,6 +57,158 @@ function parseDate(value: unknown, fieldName: string) {
   return date;
 }
 
+function parseBillingYear(value: unknown) {
+  const parsed = Number(value);
+
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < 1900 ||
+    parsed > 9999
+  ) {
+    throw new InvoiceRequestError(
+      "billing_year must be a valid year"
+    );
+  }
+
+  return parsed;
+}
+
+function parseBillingMonth(value: unknown) {
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 12) {
+    throw new InvoiceRequestError(
+      "billing_month must be 1-12"
+    );
+  }
+
+  return parsed;
+}
+
+function createUtcDate(year: number, month: number, day: number) {
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function getDaysInMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+type CustomerBillingSettings = {
+  billing_closing_day: number | null;
+  billing_closing_month_end: boolean;
+  billing_issue_day: number | null;
+  billing_issue_month_end: boolean;
+};
+
+function calculateBillingPeriod(
+  customer: CustomerBillingSettings,
+  billingYear: number,
+  billingMonth: number
+) {
+  if (customer.billing_closing_month_end) {
+    return {
+      periodStart: createUtcDate(billingYear, billingMonth, 1),
+      periodEnd: createUtcDate(
+        billingYear,
+        billingMonth,
+        getDaysInMonth(billingYear, billingMonth)
+      ),
+      closingDayForIssue: getDaysInMonth(
+        billingYear,
+        billingMonth
+      ),
+    };
+  }
+
+  const closingDay = customer.billing_closing_day;
+
+  if (
+    closingDay === null ||
+    !Number.isInteger(closingDay) ||
+    closingDay < 1 ||
+    closingDay > 31
+  ) {
+    throw new InvoiceRequestError(
+      "請求締日設定が不正です",
+      409
+    );
+  }
+
+  const previousMonth = billingMonth === 1 ? 12 : billingMonth - 1;
+  const previousMonthYear =
+    billingMonth === 1 ? billingYear - 1 : billingYear;
+  const previousClosingDay = Math.min(
+    closingDay,
+    getDaysInMonth(previousMonthYear, previousMonth)
+  );
+  const currentClosingDay = Math.min(
+    closingDay,
+    getDaysInMonth(billingYear, billingMonth)
+  );
+
+  return {
+    periodStart: createUtcDate(
+      previousMonthYear,
+      previousMonth,
+      previousClosingDay + 1
+    ),
+    periodEnd: createUtcDate(
+      billingYear,
+      billingMonth,
+      currentClosingDay
+    ),
+    closingDayForIssue: currentClosingDay,
+  };
+}
+
+function calculateInvoiceDate(
+  customer: CustomerBillingSettings,
+  billingYear: number,
+  billingMonth: number,
+  closingDayForIssue: number
+) {
+  if (customer.billing_issue_month_end) {
+    return createUtcDate(
+      billingYear,
+      billingMonth,
+      getDaysInMonth(billingYear, billingMonth)
+    );
+  }
+
+  const issueDay = customer.billing_issue_day;
+
+  if (
+    issueDay === null ||
+    !Number.isInteger(issueDay) ||
+    issueDay < 1 ||
+    issueDay > 31
+  ) {
+    throw new InvoiceRequestError(
+      "請求書発行日設定が不正です",
+      409
+    );
+  }
+
+  const issueMonth =
+    issueDay > closingDayForIssue
+      ? billingMonth
+      : billingMonth === 12
+        ? 1
+        : billingMonth + 1;
+  const issueYear =
+    issueDay > closingDayForIssue
+      ? billingYear
+      : billingMonth === 12
+        ? billingYear + 1
+        : billingYear;
+  const safeIssueDay = Math.min(
+    issueDay,
+    getDaysInMonth(issueYear, issueMonth)
+  );
+
+  return createUtcDate(issueYear, issueMonth, safeIssueDay);
+}
+
 function formatDate(date: Date, separator = "") {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Tokyo",
@@ -245,26 +397,12 @@ export async function POST(request: NextRequest) {
       "customer_id"
     );
 
-    const periodStart = parseDate(
-      body.period_start,
-      "period_start"
+    const billingYear = parseBillingYear(
+      body.billing_year
     );
-
-    const periodEnd = parseDate(
-      body.period_end,
-      "period_end"
+    const billingMonth = parseBillingMonth(
+      body.billing_month
     );
-
-    const invoiceDate = parseDate(
-      body.invoice_date,
-      "invoice_date"
-    );
-
-    if (periodStart.getTime() > periodEnd.getTime()) {
-      throw new InvoiceRequestError(
-        "period_start must be before or equal to period_end"
-      );
-    }
 
     const invoice = await prisma.$transaction(
       async (transaction) => {
@@ -281,6 +419,10 @@ export async function POST(request: NextRequest) {
           select: {
             id: true,
             name: true,
+            billing_closing_day: true,
+            billing_closing_month_end: true,
+            billing_issue_day: true,
+            billing_issue_month_end: true,
           },
         });
 
@@ -290,6 +432,22 @@ export async function POST(request: NextRequest) {
             404
           );
         }
+
+        const {
+          periodStart,
+          periodEnd,
+          closingDayForIssue,
+        } = calculateBillingPeriod(
+          customer,
+          billingYear,
+          billingMonth
+        );
+        const invoiceDate = calculateInvoiceDate(
+          customer,
+          billingYear,
+          billingMonth,
+          closingDayForIssue
+        );
 
         /*
          * --------------------------------------------------

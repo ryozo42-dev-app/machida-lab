@@ -4,6 +4,12 @@ import chromium from "@sparticuz/chromium-min";
 import puppeteer from "puppeteer-core";
 import { NextResponse } from "next/server";
 import { Prisma } from "@/lib/generated/prisma/client";
+import {
+  buildDocumentStoragePath,
+  readPdfIfExists,
+  sanitizePathSegment,
+  writePdfIfMissing,
+} from "@/lib/document-storage";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -51,8 +57,11 @@ type DeliveryPdfTotalSummary = {
 type DeliveryPdfData = {
   id: number;
   delivery_no: string;
+  customer_id: number;
   customer_name: string;
   delivery_date: string;
+  pdf_path: string | null;
+  pdf_filename: string | null;
   material_summary: DeliveryMaterialSummaryItem[];
   deposit_summary: DeliveryDepositSummaryItem[];
   total_summary: DeliveryPdfTotalSummary;
@@ -445,6 +454,8 @@ async function fetchDeliveryPdfData(
       tax_rate: true,
       tax_amount: true,
       total_amount_including_tax: true,
+      pdf_path: true,
+      pdf_filename: true,
       delivery_items: {
         orderBy: { id: "asc" },
         select: {
@@ -636,24 +647,6 @@ async function fetchDeliveryPdfData(
         `
       : [];
 
-  const previousDelivery =
-    customer?.show_material_on_delivery
-      ? await prisma.deliveries.findFirst({
-          where: {
-            customer_id: delivery.customer_id,
-            delivery_date: {
-              lt: delivery.delivery_date,
-            },
-          },
-          orderBy: {
-            delivery_date: "desc",
-          },
-          select: {
-            delivery_date: true,
-          },
-        })
-      : null;
-
   const orderItemById = new Map(
     orderItems.map((item) => [item.id, item])
   );
@@ -694,8 +687,8 @@ async function fetchDeliveryPdfData(
     DepositMaterialType,
     Prisma.Decimal
   >();
-  const depositedQuantityByDateAndMaterial = new Map<
-    string,
+  const latestDepositByMaterialType = new Map<
+    DepositMaterialType,
     {
       date: Date;
       materialType: DepositMaterialType;
@@ -710,10 +703,6 @@ async function fetchDeliveryPdfData(
   >();
   const deliveryDate = delivery.delivery_date;
   const nextDeliveryDate = createNextDate(deliveryDate);
-  const depositSummaryStartDate =
-    previousDelivery === null
-      ? null
-      : createNextDate(previousDelivery.delivery_date);
 
   for (const transaction of depositMaterialTransactions) {
     const materialType = toDepositMaterialType(
@@ -738,34 +727,36 @@ async function fetchDeliveryPdfData(
       );
 
       if (transaction.created_at < nextDeliveryDate) {
-        const isAfterPreviousDelivery =
-          depositSummaryStartDate === null ||
-          transaction.created_at >= depositSummaryStartDate;
+        const depositDateKey = formatDate(
+          transaction.created_at,
+          "-"
+        );
+        const currentLatest =
+          latestDepositByMaterialType.get(materialType);
+        const currentLatestDateKey = currentLatest
+          ? formatDate(currentLatest.date, "-")
+          : null;
 
-        if (isAfterPreviousDelivery) {
-          const depositDateKey = formatDate(
-            transaction.created_at,
-            "-"
-          );
-          const depositSummaryKey = `${depositDateKey}:${materialType}`;
-          const currentDepositSummary =
-            depositedQuantityByDateAndMaterial.get(
-              depositSummaryKey
-            );
-
-          depositedQuantityByDateAndMaterial.set(
-            depositSummaryKey,
+        if (
+          currentLatestDateKey === null ||
+          depositDateKey > currentLatestDateKey
+        ) {
+          latestDepositByMaterialType.set(materialType, {
+            date: transaction.created_at,
+            materialType,
+            label: materialLabels[materialType],
+            unit: transaction.unit,
+            quantity,
+          });
+        } else if (
+          currentLatest &&
+          depositDateKey === currentLatestDateKey
+        ) {
+          latestDepositByMaterialType.set(
+            materialType,
             {
-              date:
-                currentDepositSummary?.date ??
-                transaction.created_at,
-              materialType,
-              label: materialLabels[materialType],
-              unit: transaction.unit,
-              quantity: (
-                currentDepositSummary?.quantity ??
-                new Prisma.Decimal(0)
-              ).add(quantity),
+              ...currentLatest,
+              quantity: currentLatest.quantity.add(quantity),
             }
           );
         }
@@ -834,7 +825,7 @@ async function fetchDeliveryPdfData(
 
   const depositSummary =
     customer?.show_material_on_delivery
-      ? [...depositedQuantityByDateAndMaterial.values()]
+      ? [...latestDepositByMaterialType.values()]
           .sort((first, second) => {
             const dateDiff =
               first.date.getTime() - second.date.getTime();
@@ -1008,12 +999,15 @@ async function fetchDeliveryPdfData(
   return {
     id: delivery.id,
     delivery_no: delivery.delivery_no ?? "",
+    customer_id: delivery.customer_id,
     customer_name:
       customer?.name ?? "未登録",
     delivery_date: formatDate(
       delivery.delivery_date,
       "-"
     ),
+    pdf_path: delivery.pdf_path,
+    pdf_filename: delivery.pdf_filename,
     material_summary: materialSummary,
     deposit_summary: depositSummary,
     total_summary: {
@@ -1685,6 +1679,55 @@ function createDeliveryHtml(
 </html>`;
 }
 
+function createPdfResponse(
+  pdfBuffer: Uint8Array,
+  fileName: string
+) {
+  const body = new ArrayBuffer(pdfBuffer.byteLength);
+  new Uint8Array(body).set(pdfBuffer);
+
+  return new Response(body, {
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Disposition":
+        `inline; filename*=UTF-8''${encodeURIComponent(
+          fileName
+        )}`,
+      "Cache-Control":
+        "private, no-store",
+    },
+  });
+}
+
+function getDeliveryStorageLocation(
+  data: DeliveryPdfData
+) {
+  const dateKey =
+    /^\d{4}-\d{2}-\d{2}/.test(data.delivery_date)
+      ? data.delivery_date.slice(0, 10)
+      : "unknown-date";
+  const year =
+    /^\d{4}/.test(dateKey)
+      ? dateKey.slice(0, 4)
+      : "unknown-year";
+  const customerSegment = sanitizePathSegment(
+    data.customer_name,
+    `customer-${data.customer_id}`
+  );
+  const deliveryNoSegment = sanitizePathSegment(
+    data.delivery_no || `delivery-${data.id}`,
+    `delivery-${data.id}`
+  );
+
+  return buildDocumentStoragePath({
+    kind: "deliveries",
+    customerName: data.customer_name,
+    fallbackCustomerSegment: `customer-${data.customer_id}`,
+    year,
+    fileName: `${dateKey}_${customerSegment}_${deliveryNoSegment}.pdf`,
+  });
+}
+
 export async function GET(
   _request: Request,
   {
@@ -1723,6 +1766,43 @@ export async function GET(
       );
     }
 
+    const storedPdf = await readPdfIfExists(
+      data.pdf_path
+    );
+
+    if (storedPdf) {
+      return createPdfResponse(
+        storedPdf,
+        data.pdf_filename ||
+          path.basename(data.pdf_path || "") ||
+          `${data.delivery_no || `delivery-${data.id}`}.pdf`
+      );
+    }
+
+    const storageLocation =
+      getDeliveryStorageLocation(data);
+    const existingPdf = await readPdfIfExists(
+      storageLocation.filePath
+    );
+
+    if (existingPdf) {
+      await prisma.deliveries.update({
+        where: {
+          id: data.id,
+        },
+        data: {
+          pdf_path: storageLocation.filePath,
+          pdf_filename: storageLocation.fileName,
+          pdf_saved_at: new Date(),
+        },
+      });
+
+      return createPdfResponse(
+        existingPdf,
+        storageLocation.fileName
+      );
+    }
+
     const html = createDeliveryHtml(data);
 
     browser = await createBrowser();
@@ -1745,22 +1825,54 @@ export async function GET(
       },
     });
 
-    const fileName =
-      `${data.delivery_no || `delivery-${data.id}`}.pdf`;
+    const pdfBytes = new Uint8Array(pdfBuffer);
+    const didWrite = await writePdfIfMissing(
+      storageLocation.filePath,
+      pdfBytes
+    );
 
-    return new Response(
-      new Uint8Array(pdfBuffer),
-      {
-        headers: {
-          "Content-Type": "application/pdf",
-          "Content-Disposition":
-            `inline; filename*=UTF-8''${encodeURIComponent(
-              fileName
-            )}`,
-          "Cache-Control":
-            "private, no-store",
-        },
+    if (!didWrite) {
+      const racedPdf = await readPdfIfExists(
+        storageLocation.filePath
+      );
+
+      if (!racedPdf) {
+        throw new Error(
+          "PDF already exists but could not be read"
+        );
       }
+
+      await prisma.deliveries.update({
+        where: {
+          id: data.id,
+        },
+        data: {
+          pdf_path: storageLocation.filePath,
+          pdf_filename: storageLocation.fileName,
+          pdf_saved_at: new Date(),
+        },
+      });
+
+      return createPdfResponse(
+        racedPdf,
+        storageLocation.fileName
+      );
+    }
+
+    await prisma.deliveries.update({
+      where: {
+        id: data.id,
+      },
+      data: {
+        pdf_path: storageLocation.filePath,
+        pdf_filename: storageLocation.fileName,
+        pdf_saved_at: new Date(),
+      },
+    });
+
+    return createPdfResponse(
+      pdfBytes,
+      storageLocation.fileName
     );
   } catch (error) {
     console.error(

@@ -46,6 +46,9 @@ model deliveries {
   tax_amount                 Decimal?            @db.Decimal(12, 2)
   tax_rate                   Decimal?            @db.Decimal(5, 2)
   total_amount_including_tax Decimal?            @db.Decimal(12, 2)
+  pdf_path                   String?
+  pdf_filename               String?
+  pdf_saved_at               DateTime?           @db.Timestamp(6)
   delivery_items             delivery_items[]
   invoice_deliveries         invoice_deliveries?
   invoice_items              invoice_items[]
@@ -92,6 +95,9 @@ model invoices {
   period_end             DateTime?            @db.Date
   base_up_support_amount Decimal              @default(0) @db.Decimal(12, 2)
   display_invoice_no     String?              @db.VarChar(50)
+  pdf_path               String?
+  pdf_filename           String?
+  pdf_saved_at           DateTime?            @db.Timestamp(6)
   updated_at             DateTime             @default(now()) @db.Timestamp(6)
   invoice_deliveries     invoice_deliveries[]
   invoice_items          invoice_items[]

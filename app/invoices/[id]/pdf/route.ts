@@ -4,6 +4,12 @@ import chromium from "@sparticuz/chromium-min";
 import puppeteer from "puppeteer-core";
 import { NextResponse } from "next/server";
 import { Prisma } from "@/lib/generated/prisma/client";
+import {
+  buildDocumentStoragePath,
+  readPdfIfExists,
+  sanitizePathSegment,
+  writePdfIfMissing,
+} from "@/lib/document-storage";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -54,14 +60,23 @@ type InvoicePdfData = {
   id: number;
   invoice_no: string;
   display_invoice_no: string;
+  customer_id: number;
   customer_name: string;
   invoice_date: string;
   period_start: string;
   period_end: string;
+  pdf_path: string | null;
+  pdf_filename: string | null;
   subtotal: Prisma.Decimal | null;
   tax_rate: Prisma.Decimal | null;
   tax_amount: Prisma.Decimal | null;
   total_amount: Prisma.Decimal | null;
+  items: InvoicePdfItem[];
+};
+
+type InvoicePdfItemGroup = {
+  delivery_date: string;
+  heading: string;
   items: InvoicePdfItem[];
 };
 
@@ -92,6 +107,17 @@ function formatDate(date: Date | null, separator = "/") {
   );
 
   return `${values.year}${separator}${values.month}${separator}${values.day}`;
+}
+
+function formatJapaneseMonthDay(value: string) {
+  const [, , month, day] =
+    value.match(/^(\d{4})-(\d{2})-(\d{2})$/) ?? [];
+
+  if (!month || !day) {
+    return value;
+  }
+
+  return `${Number(month)}月${Number(day)}日`;
 }
 
 function formatYen(value: Prisma.Decimal | null) {
@@ -368,6 +394,103 @@ function renderInvoiceItemToothHtml(item: InvoicePdfItem) {
   return escapeHtml(formatOptionalText(item.tooth_display));
 }
 
+function renderInvoiceItemRowHtml(item: InvoicePdfItem) {
+  const isBus = item.work_name === "BUS";
+
+  return `
+    <tr>
+      <td>${escapeHtml(
+        isBus
+          ? "-"
+          : formatOptionalText(item.patient_name)
+      )}</td>
+      <td>${escapeHtml(formatOptionalText(item.work_name))}</td>
+      <td class="tooth-cell">
+        ${renderInvoiceItemToothHtml(item)}
+      </td>
+      <td class="material-cell">${escapeHtml(
+        formatOptionalText(item.material_usage_text)
+      ).replaceAll("\n", "<br />")}</td>
+      <td class="quantity-cell">${escapeHtml(
+        String(item.quantity)
+      )}</td>
+      <td class="money-cell">${escapeHtml(
+        formatYen(item.unit_price)
+      )}</td>
+      <td class="money-cell">${escapeHtml(
+        formatYen(item.amount)
+      )}</td>
+    </tr>
+  `;
+}
+
+function groupInvoiceItemsByDeliveryDate(
+  items: InvoicePdfItem[]
+) {
+  const groups = new Map<string, InvoicePdfItemGroup>();
+
+  for (const item of items) {
+    const group = groups.get(item.delivery_date);
+
+    if (group) {
+      group.items.push(item);
+      continue;
+    }
+
+    groups.set(item.delivery_date, {
+      delivery_date: item.delivery_date,
+      heading: formatJapaneseMonthDay(item.delivery_date),
+      items: [item],
+    });
+  }
+
+  return [...groups.values()];
+}
+
+function renderDetailTableHtml(items: InvoicePdfItem[]) {
+  return `
+    <table class="detail-table">
+      <colgroup>
+        <col style="width: 15%;" />
+        <col style="width: 31.5%;" />
+        <col style="width: 20%;" />
+        <col style="width: 9%;" />
+        <col style="width: 5%;" />
+        <col style="width: 9.75%;" />
+        <col style="width: 9.75%;" />
+      </colgroup>
+
+      <thead>
+        <tr>
+          <th>患者名</th>
+          <th>作業内容</th>
+          <th>部位</th>
+          <th>使用材料</th>
+          <th>数量</th>
+          <th>単価</th>
+          <th>金額</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        ${items.map(renderInvoiceItemRowHtml).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderInvoiceItemGroupHtml(group: InvoicePdfItemGroup) {
+  return `
+    <section class="detail-group">
+      <h2 class="detail-date-heading">
+        ${escapeHtml(group.heading)}
+      </h2>
+
+      ${renderDetailTableHtml(group.items)}
+    </section>
+  `;
+}
+
 function findLocalChromePath() {
   for (const candidate of LOCAL_CHROME_CANDIDATES) {
     if (fs.existsSync(candidate)) {
@@ -435,6 +558,8 @@ async function fetchInvoicePdfData(
       tax_rate: true,
       tax_amount: true,
       total_amount: true,
+      pdf_path: true,
+      pdf_filename: true,
     },
   });
 
@@ -457,6 +582,9 @@ async function fetchInvoicePdfData(
         invoice_id: invoice.id,
       },
       orderBy: [
+        {
+          delivery_date: "asc",
+        },
         {
           sort_order: "asc",
         },
@@ -489,10 +617,13 @@ async function fetchInvoicePdfData(
       invoice.display_invoice_no ??
       invoice.invoice_no ??
       "",
+    customer_id: invoice.customer_id,
     customer_name: customer?.name ?? "未登録",
     invoice_date: formatDate(invoice.invoice_date, "-"),
     period_start: formatDate(invoice.period_start, "-"),
     period_end: formatDate(invoice.period_end, "-"),
+    pdf_path: invoice.pdf_path,
+    pdf_filename: invoice.pdf_filename,
     subtotal: invoice.subtotal,
     tax_rate: invoice.tax_rate,
     tax_amount: invoice.tax_amount,
@@ -524,36 +655,8 @@ function createInvoiceHtml(data: InvoicePdfData) {
     )
     .toString("base64");
 
-  const itemsHtml = data.items
-    .map((item) => {
-      const isBus = item.work_name === "BUS";
-
-      return `
-        <tr>
-          <td>${escapeHtml(
-            isBus
-              ? "-"
-              : formatOptionalText(item.patient_name)
-          )}</td>
-          <td>${escapeHtml(formatOptionalText(item.work_name))}</td>
-          <td class="tooth-cell">
-            ${renderInvoiceItemToothHtml(item)}
-          </td>
-          <td class="material-cell">${escapeHtml(
-            formatOptionalText(item.material_usage_text)
-          ).replaceAll("\n", "<br />")}</td>
-          <td class="quantity-cell">${escapeHtml(
-            String(item.quantity)
-          )}</td>
-          <td class="money-cell">${escapeHtml(
-            formatYen(item.unit_price)
-          )}</td>
-          <td class="money-cell">${escapeHtml(
-            formatYen(item.amount)
-          )}</td>
-        </tr>
-      `;
-    })
+  const itemGroupsHtml = groupInvoiceItemsByDeliveryDate(data.items)
+    .map(renderInvoiceItemGroupHtml)
     .join("");
 
   return `<!doctype html>
@@ -662,6 +765,13 @@ function createInvoiceHtml(data: InvoicePdfData) {
         font-size: 21px;
       }
 
+      .detail-meta {
+        width: max-content;
+        margin-top: 50px;
+        margin-left: auto;
+        text-align: left;
+      }
+
       .section {
         margin-top: 24px;
       }
@@ -749,6 +859,25 @@ function createInvoiceHtml(data: InvoicePdfData) {
         font-weight: 700;
         text-align: center;
         white-space: nowrap;
+      }
+
+      .detail-group {
+        margin-top: 18px;
+        break-inside: auto;
+        page-break-inside: auto;
+      }
+
+      .detail-group:first-child {
+        margin-top: 0;
+      }
+
+      .detail-date-heading {
+        margin: 0 0 5px 0;
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.4;
+        break-after: avoid;
+        page-break-after: avoid;
       }
 
       .detail-table td:nth-child(1),
@@ -952,44 +1081,67 @@ function createInvoiceHtml(data: InvoicePdfData) {
           </div>
         </div>
 
-        <div class="lab-info">
+        <div class="lab-info detail-meta">
           <div>請求書番号：${escapeHtml(data.display_invoice_no)}</div>
           <div>請求日：${escapeHtml(data.invoice_date)}</div>
         </div>
       </header>
 
       <section class="section">
-        <table class="detail-table">
-          <colgroup>
-            <col style="width: 15%;" />
-            <col style="width: 31.5%;" />
-            <col style="width: 20%;" />
-            <col style="width: 9%;" />
-            <col style="width: 5%;" />
-            <col style="width: 9.75%;" />
-            <col style="width: 9.75%;" />
-          </colgroup>
-
-          <thead>
-            <tr>
-              <th>患者名</th>
-              <th>作業内容</th>
-              <th>部位</th>
-              <th>使用材料</th>
-              <th>数量</th>
-              <th>単価</th>
-              <th>金額</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            ${itemsHtml}
-          </tbody>
-        </table>
+        ${itemGroupsHtml}
       </section>
     </section>
   </body>
 </html>`;
+}
+
+function createPdfResponse(
+  pdfBuffer: Uint8Array,
+  fileName: string
+) {
+  const body = new ArrayBuffer(pdfBuffer.byteLength);
+  new Uint8Array(body).set(pdfBuffer);
+
+  return new Response(body, {
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(
+        fileName
+      )}`,
+      "Cache-Control": "private, no-store",
+    },
+  });
+}
+
+function getInvoiceStorageLocation(data: InvoicePdfData) {
+  const monthKey =
+    /^\d{4}-\d{2}/.test(data.period_end)
+      ? data.period_end.slice(0, 7)
+      : /^\d{4}-\d{2}/.test(data.invoice_date)
+        ? data.invoice_date.slice(0, 7)
+        : "unknown-month";
+  const year =
+    /^\d{4}/.test(monthKey)
+      ? monthKey.slice(0, 4)
+      : "unknown-year";
+  const customerSegment = sanitizePathSegment(
+    data.customer_name,
+    `customer-${data.customer_id}`
+  );
+  const invoiceNoSegment = sanitizePathSegment(
+    data.display_invoice_no ||
+      data.invoice_no ||
+      `invoice-${data.id}`,
+    `invoice-${data.id}`
+  );
+
+  return buildDocumentStoragePath({
+    kind: "invoices",
+    customerName: data.customer_name,
+    fallbackCustomerSegment: `customer-${data.customer_id}`,
+    year,
+    fileName: `${monthKey}_${customerSegment}_${invoiceNoSegment}.pdf`,
+  });
 }
 
 export async function GET(
@@ -1027,6 +1179,40 @@ export async function GET(
       );
     }
 
+    const storedPdf = await readPdfIfExists(data.pdf_path);
+
+    if (storedPdf) {
+      return createPdfResponse(
+        storedPdf,
+        data.pdf_filename ||
+          path.basename(data.pdf_path || "") ||
+          `${data.display_invoice_no || `invoice-${data.id}`}.pdf`
+      );
+    }
+
+    const storageLocation = getInvoiceStorageLocation(data);
+    const existingPdf = await readPdfIfExists(
+      storageLocation.filePath
+    );
+
+    if (existingPdf) {
+      await prisma.invoices.update({
+        where: {
+          id: data.id,
+        },
+        data: {
+          pdf_path: storageLocation.filePath,
+          pdf_filename: storageLocation.fileName,
+          pdf_saved_at: new Date(),
+        },
+      });
+
+      return createPdfResponse(
+        existingPdf,
+        storageLocation.fileName
+      );
+    }
+
     const html = createInvoiceHtml(data);
 
     browser = await createBrowser();
@@ -1049,19 +1235,55 @@ export async function GET(
       },
     });
 
-    const fileName = `${
-      data.display_invoice_no || `invoice-${data.id}`
-    }.pdf`;
+    const pdfBytes = new Uint8Array(pdfBuffer);
+    const didWrite = await writePdfIfMissing(
+      storageLocation.filePath,
+      pdfBytes
+    );
 
-    return new Response(new Uint8Array(pdfBuffer), {
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(
-          fileName
-        )}`,
-        "Cache-Control": "private, no-store",
+    if (!didWrite) {
+      const racedPdf = await readPdfIfExists(
+        storageLocation.filePath
+      );
+
+      if (!racedPdf) {
+        throw new Error(
+          "PDF already exists but could not be read"
+        );
+      }
+
+      await prisma.invoices.update({
+        where: {
+          id: data.id,
+        },
+        data: {
+          pdf_path: storageLocation.filePath,
+          pdf_filename: storageLocation.fileName,
+          pdf_saved_at: new Date(),
+        },
+      });
+
+      return createPdfResponse(
+        racedPdf,
+        storageLocation.fileName
+      );
+    }
+
+    await prisma.invoices.update({
+      where: {
+        id: data.id,
+      },
+      data: {
+        pdf_path: storageLocation.filePath,
+        pdf_filename: storageLocation.fileName,
+        pdf_saved_at: new Date(),
       },
     });
+
+    return createPdfResponse(
+      pdfBytes,
+      storageLocation.fileName
+    );
   } catch (error) {
     console.error("Failed to generate invoice PDF", error);
 

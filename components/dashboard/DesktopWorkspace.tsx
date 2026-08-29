@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import DockLauncher, { type DockItem } from "./DockLauncher";
 import ModalDisplayArea from "./ModalDisplayArea";
 
@@ -50,6 +51,7 @@ const dockItems: DockItem[] = [
 ];
 
 export default function DesktopWorkspace() {
+  const router = useRouter();
   const [activeId, setActiveId] = useState("dashboard");
   const [previousId, setPreviousId] = useState<string | null>(null);
   const [transitionPhase, setTransitionPhase] = useState<"idle" | "fadeOut" | "fadeIn">("idle");
@@ -75,6 +77,11 @@ export default function DesktopWorkspace() {
 
   const handleSelect = (nextId: string, launcherRect: DOMRect) => {
     void launcherRect;
+
+    if (nextId === "invoice") {
+      router.push("/invoices");
+      return;
+    }
 
     if (nextId === activeId && previousId === null) {
       return;
