@@ -1,7 +1,54 @@
 "use client";
 
+import DockLauncher, { type DockItem } from "@/components/dashboard/DockLauncher";
 import Header from "@/components/layout/Header";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+
+const dockItems: DockItem[] = [
+  {
+    id: "dashboard",
+    iconSrc: "/icons/dashboard.svg",
+    iconAlt: "ダッシュボード",
+    label: "ダッシュボード",
+    indicatorColor: "#fff362",
+  },
+  {
+    id: "order",
+    iconSrc: "/icons/order.svg",
+    iconAlt: "受注入力",
+    label: "受注入力",
+    indicatorColor: "#fff362",
+  },
+  {
+    id: "work",
+    iconSrc: "/icons/work.svg",
+    iconAlt: "作業時入力",
+    label: "作業時入力",
+    indicatorColor: "#fff362",
+  },
+  {
+    id: "delivery",
+    iconSrc: "/icons/delivery.svg",
+    iconAlt: "納品書",
+    label: "納品書",
+    indicatorColor: "#fff362",
+  },
+  {
+    id: "invoice",
+    iconSrc: "/icons/invoice.svg",
+    iconAlt: "請求書",
+    label: "請求書",
+    indicatorColor: "#fff362",
+  },
+  {
+    id: "manage",
+    iconSrc: "/icons/manage.svg",
+    iconAlt: "管理",
+    label: "管理",
+    indicatorColor: "#fff362",
+  },
+];
 
 type Customer = {
   id: number;
@@ -109,6 +156,7 @@ async function readErrorMessage(response: Response) {
 }
 
 export default function InvoicesPage() {
+  const router = useRouter();
   const initialBillingDate = useMemo(
     () => getInitialBillingDate(),
     []
@@ -312,10 +360,19 @@ export default function InvoicesPage() {
     setIsConfirmModalOpen(false);
   };
 
+  const handleDockSelect = (nextId: string) => {
+    if (nextId === "invoice") {
+      return;
+    }
+
+    router.push("/");
+  };
+
   return (
-    <main className="min-h-screen bg-white text-[#222222]">
+    <main className="flex h-screen flex-col overflow-hidden bg-white text-[#222222]">
       <Header />
 
+      <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-8 sm:px-8">
         <div>
           <h1 className="text-3xl font-bold text-[#222222]">
@@ -696,6 +753,15 @@ export default function InvoicesPage() {
             </section>
           </div>
         ) : null}
+      </div>
+      </div>
+
+      <div className="flex justify-center px-4 pb-4 pt-3 sm:px-6 sm:pb-6 sm:pt-4">
+        <DockLauncher
+          items={dockItems}
+          activeId="invoice"
+          onSelect={handleDockSelect}
+        />
       </div>
     </main>
   );
