@@ -4,6 +4,7 @@ import chromium from "@sparticuz/chromium-min";
 import puppeteer from "puppeteer-core";
 import { NextResponse } from "next/server";
 import { Prisma } from "@/lib/generated/prisma/client";
+import { requireAuthResponse } from "@/lib/auth";
 import {
   buildDocumentStoragePath,
   readPdfIfExists,
@@ -1152,6 +1153,9 @@ export async function GET(
     params: Promise<{ id: string }>;
   }
 ) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   const resolvedParams = await params;
 
   const invoiceId = parsePositiveInteger(

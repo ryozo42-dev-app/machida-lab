@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/lib/generated/prisma/client";
+import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const BASE_UP_SUPPORT_AMOUNT_PER_ITEM = 136;
@@ -286,6 +287,9 @@ function createToothDisplay(toothNos: string[]) {
  * 作成済み請求書一覧
  */
 export async function GET() {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   try {
     const invoices = await prisma.invoices.findMany({
       orderBy: {
@@ -377,6 +381,9 @@ export async function GET() {
  * invoice_items
  */
 export async function POST(request: NextRequest) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   try {
     const parsedBody: unknown = await request.json();
 

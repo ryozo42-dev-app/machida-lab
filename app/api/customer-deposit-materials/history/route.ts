@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 type CustomerDepositMaterialTransactionRow = {
@@ -20,6 +21,9 @@ const getMaterialNamePattern = (materialType: string) =>
   materialType === "para" ? "%パラ%" : "%ミロ%";
 
 export async function GET(request: Request) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   const searchParams = new URL(request.url).searchParams;
   const customerIdParam = searchParams.get("customer_id");
   const materialType =

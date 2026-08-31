@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   try {
     const orders = await prisma.orders.findMany();
 
@@ -17,6 +21,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   try {
     const body = await request.json();
 

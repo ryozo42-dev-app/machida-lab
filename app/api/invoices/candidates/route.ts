@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 class InvoiceCandidateRequestError extends Error {
@@ -144,6 +145,9 @@ function calculateBillingPeriod(
 }
 
 export async function GET(request: NextRequest) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   try {
     const searchParams = request.nextUrl.searchParams;
 

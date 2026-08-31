@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/lib/generated/prisma/client";
+import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 type DeliveryItemRequest = {
@@ -128,6 +129,9 @@ function addUniquePrice(
 }
 
 export async function GET() {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   try {
     const deliveries = await prisma.deliveries.findMany({
       include: {
@@ -151,6 +155,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   try {
     const parsedBody: unknown = await request.json();
 

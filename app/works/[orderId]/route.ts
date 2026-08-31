@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const WORK_STATUSES = new Set(["in_progress", "completed"]);
@@ -95,6 +96,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ orderId: string }> }
 ) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   const { orderId: orderIdParam } = await params;
   const orderId = Number(orderIdParam);
 

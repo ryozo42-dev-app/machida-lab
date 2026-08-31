@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/lib/generated/prisma/client";
+import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -67,6 +68,9 @@ function addUniquePrice(
 }
 
 export async function GET(request: NextRequest) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   try {
     const customerId = parsePositiveInteger(
       request.nextUrl.searchParams.get("customer_id"),

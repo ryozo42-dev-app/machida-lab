@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 function formatDate(date: Date, separator = "-") {
@@ -29,6 +30,9 @@ function formatToothNumber(toothNumber: string) {
 }
 
 export async function GET() {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   try {
     const orders = await prisma.orders.findMany({
       where: {

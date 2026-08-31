@@ -1,4 +1,5 @@
 import Image from "next/image";
+import LogoutButton from "@/components/auth/LogoutButton";
 
 export default function Header() {
   return (
@@ -46,6 +47,8 @@ export default function Header() {
           <p className="text-lg font-semibold text-[#fff362] drop-shadow-[1px_1px_2px_rgba(0,0,0,0.35)]">
             Version 1.0
           </p>
+
+          <LogoutButton />
 
         </div>
 

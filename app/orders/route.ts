@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { randomUUID } from "node:crypto";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
@@ -149,6 +150,9 @@ async function parseOrderBody(req: NextRequest) {
 }
 
 export async function GET() {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   const orders = await prisma.orders.findMany({
     orderBy: {
       id: "desc",
@@ -159,6 +163,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   let temporaryFilePath: string | null = null;
   let savedFilePath: string | null = null;
 

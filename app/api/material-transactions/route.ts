@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
+import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const TRANSACTION_TYPES = new Set(["initial", "add", "use", "adjust"]);
 
 export async function POST(request: Request) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   try {
     const body: unknown = await request.json();
 

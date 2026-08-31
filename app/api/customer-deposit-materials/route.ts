@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/lib/generated/prisma/client";
+import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 type CustomerDepositMaterialBalanceRow = {
@@ -36,6 +37,9 @@ const isDepositMaterialType = (
 ): value is DepositMaterialType => DEPOSIT_MATERIAL_TYPES.has(value);
 
 export async function GET(request: Request) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   const searchParams = new URL(request.url).searchParams;
   const customerIdParam = searchParams.get("customer_id");
   const materialIdParam = searchParams.get("material_id");
@@ -151,6 +155,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   try {
     const body: unknown = await request.json();
 

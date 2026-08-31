@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -11,6 +12,9 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ fileId: string }> }
 ) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   const { fileId: fileIdParam } = await params;
   const fileId = Number(fileIdParam);
 

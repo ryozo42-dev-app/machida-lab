@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
+import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   try {
     const { id: idParam } = await context.params;
     const id = Number(idParam);

@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
+import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   try {
     const customers = await prisma.customers.findMany({
       select: {
@@ -31,6 +35,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   try {
     const body = await request.json();
 

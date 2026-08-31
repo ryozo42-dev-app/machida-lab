@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 type CreatePatientBody = {
@@ -8,6 +9,9 @@ type CreatePatientBody = {
 };
 
 export async function GET(request: Request) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   const customerIdParam = new URL(request.url).searchParams.get("customer_id");
   const customerId = Number(customerIdParam);
 
@@ -51,6 +55,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const authResponse = await requireAuthResponse();
+  if (authResponse) return authResponse;
+
   try {
     const body = (await request.json()) as CreatePatientBody;
     const customerId = Number(body.customer_id);

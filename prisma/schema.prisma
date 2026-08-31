@@ -180,6 +180,20 @@ model users {
   password_hash String?
   role          String?   @db.VarChar(20)
   created_at    DateTime? @default(now()) @db.Timestamp(6)
+  user_sessions user_sessions[]
+}
+
+model user_sessions {
+  id         Int       @id @default(autoincrement())
+  user_id    Int
+  token_hash String    @unique
+  expires_at DateTime  @db.Timestamp(6)
+  revoked_at DateTime? @db.Timestamp(6)
+  created_at DateTime  @default(now()) @db.Timestamp(6)
+  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id], map: "idx_user_sessions_user_id")
+  @@index([expires_at], map: "idx_user_sessions_expires_at")
 }
 
 model materials {
