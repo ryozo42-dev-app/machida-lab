@@ -365,6 +365,11 @@ export default function InvoicesPage() {
       return;
     }
 
+    if (nextId === "manage") {
+      router.push("/?menu=manage");
+      return;
+    }
+
     router.push("/");
   };
 

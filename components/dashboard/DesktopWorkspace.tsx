@@ -105,6 +105,21 @@ export default function DesktopWorkspace() {
   };
 
   useEffect(() => {
+    const url = new URL(window.location.href);
+
+    if (url.searchParams.get("menu") === "manage") {
+      setActiveId("manage");
+      url.searchParams.delete("menu");
+
+      window.history.replaceState(
+        null,
+        "",
+        `${url.pathname}${url.search}${url.hash}`
+      );
+    }
+  }, []);
+
+  useEffect(() => {
     return () => {
       clearTransitionTimers();
     };
