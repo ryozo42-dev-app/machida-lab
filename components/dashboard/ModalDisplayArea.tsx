@@ -11,7 +11,6 @@ type ModalDisplayAreaProps = {
 type DashboardCard = {
   id: string;
   title: string;
-  count: string;
   iconSrc: string;
   accentClassName: string;
   iconBadgeClassName: string;
@@ -21,7 +20,6 @@ const dashboardCards: DashboardCard[] = [
   {
     id: "deliveryTomorrow",
     title: "明日の納品予定",
-    count: "8件",
     iconSrc: "/icons/delivery.svg",
     accentClassName: "bg-[#fff362]",
     iconBadgeClassName: "bg-[#FFF8E1]",
@@ -29,7 +27,6 @@ const dashboardCards: DashboardCard[] = [
   {
     id: "unfinished",
     title: "未完了作業",
-    count: "3件",
     iconSrc: "/icons/work.svg",
     accentClassName: "bg-[#fff362]",
     iconBadgeClassName: "bg-[#FFFFE0]",
@@ -37,7 +34,6 @@ const dashboardCards: DashboardCard[] = [
   {
     id: "overdue",
     title: "納期超過",
-    count: "1件",
     iconSrc: "/icons/overdue-warning.svg",
     accentClassName: "bg-[#fff362]",
     iconBadgeClassName: "bg-[#FFFFE0]",
@@ -45,7 +41,6 @@ const dashboardCards: DashboardCard[] = [
   {
     id: "ordersMonth",
     title: "今月受注件数",
-    count: "126件",
     iconSrc: "/icons/order.svg",
     accentClassName: "bg-[#fff362]",
     iconBadgeClassName: "bg-[#FFFFE0]",
@@ -239,6 +234,14 @@ type ConfirmedDelivery = {
   items: ConfirmedDeliveryItem[];
 };
 
+type DashboardSummary = {
+  deliveryTomorrowCount: number;
+  unfinishedWorkCount: number;
+  overdueCount: number;
+  ordersThisMonthCount: number;
+  fetchedAt: string;
+};
+
 function getTodayJstString() {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Tokyo",
@@ -249,6 +252,31 @@ function getTodayJstString() {
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
 
   return `${values.year}-${values.month}-${values.day}`;
+}
+
+function formatDashboardFetchedAt(value: string | null) {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return `${values.year}/${values.month}/${values.day} ${values.hour}:${values.minute}`;
 }
 
 function formatYen(value: string | null) {
@@ -270,8 +298,65 @@ function formatYen(value: string | null) {
 }
 
 function DashboardModal() {
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState("");
+
+  const loadSummary = async () => {
+    setIsSummaryLoading(true);
+    setSummaryError("");
+
+    try {
+      const response = await fetch("/api/dashboard/summary");
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          typeof data?.error === "string"
+            ? data.error
+            : "ダッシュボードの取得に失敗しました"
+        );
+      }
+
+      setSummary(data as DashboardSummary);
+    } catch (error) {
+      console.error("Failed to load dashboard summary", error);
+      setSummaryError("ダッシュボードの取得に失敗しました");
+    } finally {
+      setIsSummaryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadSummary();
+  }, []);
+
   const handleCardClick = (card: DashboardCard) => {
     console.log(`[Dashboard] ${card.id} clicked`);
+  };
+
+  const getCardCount = (cardId: string) => {
+    if (!summary) {
+      return "-件";
+    }
+
+    if (cardId === "deliveryTomorrow") {
+      return `${summary.deliveryTomorrowCount}件`;
+    }
+
+    if (cardId === "unfinished") {
+      return `${summary.unfinishedWorkCount}件`;
+    }
+
+    if (cardId === "overdue") {
+      return `${summary.overdueCount}件`;
+    }
+
+    if (cardId === "ordersMonth") {
+      return `${summary.ordersThisMonthCount}件`;
+    }
+
+    return "-件";
   };
 
   return (
@@ -292,14 +377,15 @@ function DashboardModal() {
 
         <button
           type="button"
-          onClick={() => console.log("[Dashboard] refresh clicked")}
+          onClick={() => void loadSummary()}
+          disabled={isSummaryLoading}
           className="inline-flex items-center gap-2 rounded-xl border border-[#ECECEC] bg-white px-4 py-2 text-sm font-semibold text-[#444444] transition-colors duration-200 ease-[ease] hover:bg-[#FFF7E8]"
         >
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M21 12a9 9 0 1 1-2.64-6.36" />
             <polyline points="21 3 21 9 15 9" />
           </svg>
-          <span>更新</span>
+          <span>{isSummaryLoading ? "更新中" : "更新"}</span>
         </button>
       </div>
 
@@ -320,7 +406,7 @@ function DashboardModal() {
 
               <div className="min-w-0">
                 <p className="truncate text-[1.2rem] font-bold text-[#222222]">{card.title}</p>
-                <p className="mt-1 text-[2.5rem] font-extrabold leading-none text-black">{card.count}</p>
+                <p className="mt-1 text-[2.5rem] font-extrabold leading-none text-black">{getCardCount(card.id)}</p>
               </div>
             </div>
 
@@ -338,7 +424,10 @@ function DashboardModal() {
             <path d="M12 7v6l4 2" />
           </svg>
           <span>最終更新</span>
-          <span>2026/08/06 10:30</span>
+          <span>{formatDashboardFetchedAt(summary?.fetchedAt ?? null)}</span>
+          {summaryError ? (
+            <span className="text-[#B42318]">{summaryError}</span>
+          ) : null}
         </p>
       </div>
     </section>
