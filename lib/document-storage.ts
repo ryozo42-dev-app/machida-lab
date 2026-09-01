@@ -61,7 +61,105 @@ export function buildDocumentStoragePath({
     directory,
     fileName: safeFileName,
     filePath: path.join(directory, safeFileName),
+    relativePath: path.join(
+      kind,
+      safeCustomerName,
+      safeYear,
+      safeFileName
+    ),
   };
+}
+
+const legacyDocumentStorageRoot = path.resolve(
+  "/opt/machida-lab"
+);
+
+function isPathInsideDirectory(filePath: string, directory: string) {
+  const relativePath = path.relative(directory, filePath);
+
+  return (
+    relativePath === "" ||
+    (!relativePath.startsWith("..") &&
+      !path.isAbsolute(relativePath))
+  );
+}
+
+function resolveStorageRelativePath(relativePath: string) {
+  const storageRoot = path.resolve(getDocumentStorageRoot());
+  const normalizedRelativePath = path.normalize(relativePath);
+
+  if (
+    path.isAbsolute(normalizedRelativePath) ||
+    normalizedRelativePath === ".." ||
+    normalizedRelativePath.startsWith(`..${path.sep}`)
+  ) {
+    return null;
+  }
+
+  const resolvedPath = path.resolve(
+    storageRoot,
+    normalizedRelativePath
+  );
+
+  return isPathInsideDirectory(resolvedPath, storageRoot)
+    ? resolvedPath
+    : null;
+}
+
+function extractLegacyDocumentRelativePath(filePath: string) {
+  const resolvedPath = path.resolve(filePath);
+
+  if (
+    !isPathInsideDirectory(resolvedPath, legacyDocumentStorageRoot)
+  ) {
+    return null;
+  }
+
+  const relativePath = path.relative(
+    legacyDocumentStorageRoot,
+    resolvedPath
+  );
+  const firstSegment = relativePath.split(path.sep)[0];
+
+  if (firstSegment !== "invoices" && firstSegment !== "deliveries") {
+    return null;
+  }
+
+  return relativePath;
+}
+
+function createReadPathCandidates(filePath: string) {
+  const candidates = [];
+  const storageRoot = path.resolve(getDocumentStorageRoot());
+
+  if (path.isAbsolute(filePath)) {
+    const resolvedPath = path.resolve(filePath);
+
+    if (
+      isPathInsideDirectory(resolvedPath, storageRoot) ||
+      extractLegacyDocumentRelativePath(resolvedPath)
+    ) {
+      candidates.push(resolvedPath);
+    }
+
+    const legacyRelativePath =
+      extractLegacyDocumentRelativePath(resolvedPath);
+    const fallbackPath = legacyRelativePath
+      ? resolveStorageRelativePath(legacyRelativePath)
+      : null;
+
+    if (fallbackPath) {
+      candidates.push(fallbackPath);
+    }
+  } else {
+    const resolvedPath = resolveStorageRelativePath(filePath);
+
+    if (resolvedPath) {
+      candidates.push(resolvedPath);
+    }
+  }
+
+  return [...new Set(candidates)];
 }
 
 export async function readPdfIfExists(
@@ -71,19 +169,23 @@ export async function readPdfIfExists(
     return null;
   }
 
-  try {
-    return await fs.readFile(filePath);
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      "code" in error &&
-      error.code === "ENOENT"
-    ) {
-      return null;
-    }
+  for (const candidate of createReadPathCandidates(filePath)) {
+    try {
+      return await fs.readFile(candidate);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        continue;
+      }
 
-    throw error;
+      throw error;
+    }
   }
+
+  return null;
 }
 
 export async function writePdfIfMissing(

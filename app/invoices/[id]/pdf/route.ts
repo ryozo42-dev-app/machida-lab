@@ -1205,7 +1205,7 @@ export async function GET(
           id: data.id,
         },
         data: {
-          pdf_path: storageLocation.filePath,
+          pdf_path: storageLocation.relativePath,
           pdf_filename: storageLocation.fileName,
           pdf_saved_at: new Date(),
         },
@@ -1261,7 +1261,7 @@ export async function GET(
           id: data.id,
         },
         data: {
-          pdf_path: storageLocation.filePath,
+          pdf_path: storageLocation.relativePath,
           pdf_filename: storageLocation.fileName,
           pdf_saved_at: new Date(),
         },
@@ -1278,7 +1278,7 @@ export async function GET(
         id: data.id,
       },
       data: {
-        pdf_path: storageLocation.filePath,
+        pdf_path: storageLocation.relativePath,
         pdf_filename: storageLocation.fileName,
         pdf_saved_at: new Date(),
       },

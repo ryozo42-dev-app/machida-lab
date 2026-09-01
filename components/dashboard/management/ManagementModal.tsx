@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import ClinicModal from "./ClinicModal";
+import DocumentManagementPanel from "./DocumentManagementPanel";
 
 type ManagementMenu = {
   id: string;
@@ -27,24 +28,14 @@ const managementMenus: ManagementMenu[] = [
     description: "歯科医院の登録・編集",
   },
   {
-    id: "patient",
-    title: "患者マスター",
-    description: "患者情報の登録・編集",
-  },
-  {
     id: "user",
     title: "ユーザーマスター",
     description: "ユーザー・権限の管理",
   },
   {
-    id: "supplier",
-    title: "仕入れマスター",
-    description: "仕入れ先・仕入れ情報の管理",
-  },
-  {
-    id: "material",
-    title: "材料管理",
-    description: "材料・医院別預かり材の管理",
+    id: "documents",
+    title: "帳票管理",
+    description: "納品書・請求書の検索・閲覧",
   },
 ];
 
@@ -262,6 +253,12 @@ export default function ManagementModal() {
           />
         ) : null}
       </>
+    );
+  }
+
+  if (activeMenu === "documents") {
+    return (
+      <DocumentManagementPanel onBack={() => setActiveMenu(null)} />
     );
   }
 
