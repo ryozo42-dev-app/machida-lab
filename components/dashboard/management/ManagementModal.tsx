@@ -3,11 +3,16 @@
 import { useEffect, useState } from "react";
 import ClinicModal from "./ClinicModal";
 import DocumentManagementPanel from "./DocumentManagementPanel";
+import UserManagementPanel from "./UserManagementPanel";
 
 type ManagementMenu = {
   id: string;
   title: string;
   description: string;
+};
+
+type CurrentUser = {
+  role: string | null;
 };
 
 type Clinic = {
@@ -41,6 +46,7 @@ const managementMenus: ManagementMenu[] = [
 
 export default function ManagementModal() {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
 
   const [customers, setCustomers] = useState<Clinic[]>([]);
   const [isCustomersLoading, setIsCustomersLoading] = useState(false);
@@ -51,6 +57,37 @@ export default function ManagementModal() {
   >(null);
 
   const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadCurrentUser = async () => {
+      try {
+        const response = await fetch("/api/auth/me", {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          setCurrentUserRole(null);
+          return;
+        }
+
+        const data = (await response.json()) as { user?: CurrentUser };
+        setCurrentUserRole(data.user?.role ?? null);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        console.error("Failed to load current user", error);
+        setCurrentUserRole(null);
+      }
+    };
+
+    void loadCurrentUser();
+
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     if (activeMenu !== "clinic") {
@@ -262,6 +299,10 @@ export default function ManagementModal() {
     );
   }
 
+  if (activeMenu === "user") {
+    return <UserManagementPanel onBack={() => setActiveMenu(null)} />;
+  }
+
   return (
     <section
       className="flex h-full min-h-[340px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6"
@@ -288,7 +329,9 @@ export default function ManagementModal() {
       </div>
 
       <div className="mt-5 grid min-h-0 flex-1 grid-cols-2 gap-4">
-        {managementMenus.map((menu) => (
+        {managementMenus
+          .filter((menu) => menu.id !== "user" || currentUserRole === "admin")
+          .map((menu) => (
           <button
             key={menu.id}
             type="button"
