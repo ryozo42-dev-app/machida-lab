@@ -725,14 +725,6 @@ export default function InvoicesPage() {
                         {createdInvoice.display_invoice_no}
                       </p>
                     </div>
-                    <a
-                      href={`/invoices/${createdInvoice.id}/pdf`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-4 inline-flex h-10 items-center rounded-[8px] border border-[#222222] bg-white px-4 text-sm font-semibold text-[#222222] transition-colors hover:bg-[#F7F7F7]"
-                    >
-                      請求書PDFを表示
-                    </a>
                   </div>
                 ) : null}
               </div>
@@ -746,14 +738,25 @@ export default function InvoicesPage() {
                 >
                   キャンセル
                 </button>
-                <button
-                  type="button"
-                  onClick={handleIssue}
-                  disabled={!canIssue}
-                  className="h-10 rounded-[8px] bg-[#fff362] px-5 text-sm font-bold text-[#222222] transition-colors hover:bg-[#fff362] disabled:cursor-not-allowed disabled:bg-[#BDBDBD]"
-                >
-                  {isIssuing ? "発行中..." : "請求書を発行"}
-                </button>
+                {createdInvoice ? (
+                  <a
+                    href={`/invoices/${createdInvoice.id}/pdf`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-10 items-center rounded-[8px] bg-[#fff362] px-5 text-sm font-bold text-[#222222] transition-colors hover:bg-[#fff362]"
+                  >
+                    請求書PDFを表示
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleIssue}
+                    disabled={!canIssue}
+                    className="h-10 rounded-[8px] bg-[#fff362] px-5 text-sm font-bold text-[#222222] transition-colors hover:bg-[#fff362] disabled:cursor-not-allowed disabled:bg-[#BDBDBD]"
+                  >
+                    {isIssuing ? "発行中..." : "請求書を発行"}
+                  </button>
+                )}
               </footer>
             </section>
           </div>
