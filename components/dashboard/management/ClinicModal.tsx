@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+const AUTO_INVOICE_LOCK_POLLING_INTERVAL_MS = 30_000;
+
 type DepositMaterialType = "para" | "miro";
 
 type DepositMaterialBalance = {
@@ -40,6 +42,7 @@ type Clinic = {
 type ClinicModalProps = {
   mode: "create" | "edit";
   customer: Clinic | null;
+  error?: string | null;
   onClose: () => void;
   onSave: (data: {
     name: string;
@@ -52,9 +55,24 @@ type ClinicModalProps = {
   }) => void;
 };
 
+type AutoInvoiceLockResponse = {
+  locked: boolean;
+};
+
+function isAutoInvoiceLockResponse(
+  value: unknown
+): value is AutoInvoiceLockResponse {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as Record<string, unknown>).locked === "boolean"
+  );
+}
+
 export default function ClinicModal({
   mode,
   customer,
+  error,
   onClose,
   onSave,
 }: ClinicModalProps) {
@@ -86,6 +104,7 @@ const [depositHistory, setDepositHistory] = useState<
   DepositMaterialTransaction[]
 >([]);
 const [depositError, setDepositError] = useState("");
+const [isAutoInvoiceLocked, setIsAutoInvoiceLocked] = useState(false);
 
 const depositTransactionLabels: Record<string, string> = {
   deposit: "預かり",
@@ -111,6 +130,36 @@ const formatDepositQuantity = (value: string) => {
 
   return number.toString();
 };
+
+const fetchAutoInvoiceLockStatus = useCallback(async () => {
+  try {
+    const response = await fetch("/api/auto-invoice-lock", {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const body: unknown = await response.json();
+
+    if (isAutoInvoiceLockResponse(body)) {
+      setIsAutoInvoiceLocked(body.locked);
+    }
+  } catch {
+    // PATCH側の409を最終防御にするため、取得失敗時は現在状態を維持する。
+  }
+}, []);
+
+  useEffect(() => {
+  void fetchAutoInvoiceLockStatus();
+
+  const intervalId = window.setInterval(() => {
+    void fetchAutoInvoiceLockStatus();
+  }, AUTO_INVOICE_LOCK_POLLING_INTERVAL_MS);
+
+  return () => window.clearInterval(intervalId);
+}, [fetchAutoInvoiceLockStatus]);
 
   const fetchDepositBalances = useCallback(async () => {
   if (mode !== "edit" || !customer) {
@@ -414,6 +463,12 @@ const formatDepositQuantity = (value: string) => {
                 請求設定
               </p>
 
+              {isAutoInvoiceLocked ? (
+                <p className="mt-2 text-xs font-semibold text-[#B42318]">
+                  自動発行処理中のため請求設定は一時的に変更できません。
+                </p>
+              ) : null}
+
               <div className="mt-3 grid grid-cols-2 gap-4">
                 <div>
                   <span className="text-sm text-[#555555]">
@@ -429,7 +484,9 @@ const formatDepositQuantity = (value: string) => {
                       onChange={(event) =>
                         setBillingClosingDay(event.target.value)
                       }
-                      disabled={billingClosingMonthEnd}
+                      disabled={
+                        billingClosingMonthEnd || isAutoInvoiceLocked
+                      }
                       placeholder="1〜31"
                       className="w-full rounded-lg border border-[#DCDCDC] bg-white px-3 py-2.5 text-sm text-[#222222] outline-none transition-colors placeholder:text-[#AAAAAA] focus:border-[#fff362] disabled:bg-[#F5F5F5] disabled:text-[#999999]"
                     />
@@ -443,6 +500,7 @@ const formatDepositQuantity = (value: string) => {
                     <input
                       type="checkbox"
                       checked={billingClosingMonthEnd}
+                      disabled={isAutoInvoiceLocked}
                       onChange={(event) =>
                         setBillingClosingMonthEnd(event.target.checked)
                       }
@@ -465,13 +523,15 @@ const formatDepositQuantity = (value: string) => {
                       type="number"
                       min={1}
                       max={31}
-                      disabled={billingIssueMonthEnd}
+                      disabled={
+                        billingIssueMonthEnd || isAutoInvoiceLocked
+                      }
                       value={billingIssueDay}
                       onChange={(event) =>
                         setBillingIssueDay(event.target.value)
                       }
                       placeholder="1〜31"
-                      className="w-full rounded-lg border border-[#DCDCDC] bg-white px-3 py-2.5 text-sm text-[#222222] outline-none transition-colors placeholder:text-[#AAAAAA] focus:border-[#fff362]"
+                      className="w-full rounded-lg border border-[#DCDCDC] bg-white px-3 py-2.5 text-sm text-[#222222] outline-none transition-colors placeholder:text-[#AAAAAA] focus:border-[#fff362] disabled:bg-[#F5F5F5] disabled:text-[#999999]"
                     />
 
                     <span className="shrink-0 text-sm text-[#555555]">
@@ -483,6 +543,7 @@ const formatDepositQuantity = (value: string) => {
                     <input
                       type="checkbox"
                       checked={billingIssueMonthEnd}
+                      disabled={isAutoInvoiceLocked}
                       onChange={(event) =>
                         setBillingIssueMonthEnd(event.target.checked)
                       }
@@ -625,6 +686,12 @@ const formatDepositQuantity = (value: string) => {
             </div>
 
           <div className="mt-7 flex justify-end gap-2 border-t border-[#ECECEC] pt-4">
+            {error ? (
+              <p className="mr-auto max-w-[300px] self-center text-sm font-semibold text-[#B42318]">
+                {error}
+              </p>
+            ) : null}
+
             <button
               type="button"
               onClick={onClose}

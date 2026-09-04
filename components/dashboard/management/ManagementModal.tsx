@@ -55,6 +55,7 @@ export default function ManagementModal() {
   const [clinicModalMode, setClinicModalMode] = useState<
     "create" | "edit" | null
   >(null);
+  const [clinicModalError, setClinicModalError] = useState("");
 
   const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null);
 
@@ -129,16 +130,19 @@ export default function ManagementModal() {
   }, [activeMenu]);
 
   const openCreateClinicModal = () => {
+    setClinicModalError("");
     setSelectedClinic(null);
     setClinicModalMode("create");
   };
 
   const openEditClinicModal = (clinic: Clinic) => {
+    setClinicModalError("");
     setSelectedClinic(clinic);
     setClinicModalMode("edit");
   };
 
   const closeClinicModal = () => {
+    setClinicModalError("");
     setClinicModalMode(null);
     setSelectedClinic(null);
   };
@@ -153,6 +157,7 @@ export default function ManagementModal() {
     show_material_on_delivery: boolean;
   }) => {
     try {
+      setClinicModalError("");
       const isEdit = clinicModalMode === "edit" && selectedClinic;
       const url = isEdit
         ? `/api/customers/${selectedClinic.id}`
@@ -184,10 +189,13 @@ export default function ManagementModal() {
       closeClinicModal();
     } catch (error) {
       console.error("Failed to save customer", error);
-      setCustomersError(
+      const message =
         error instanceof Error
           ? error.message
-          : "歯科医院の保存に失敗しました"
+          : "歯科医院の保存に失敗しました";
+      setClinicModalError(message);
+      setCustomersError(
+        message
       );
     }
   };
@@ -285,6 +293,7 @@ export default function ManagementModal() {
           <ClinicModal
             mode={clinicModalMode}
             customer={selectedClinic}
+            error={clinicModalError}
             onClose={closeClinicModal}
             onSave={handleClinicSave}
           />

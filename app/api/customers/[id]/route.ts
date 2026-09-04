@@ -1,6 +1,16 @@
 import { NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/auth";
+import { tryAcquireAutoInvoiceTransactionLock } from "@/lib/auto-invoices/auto-invoice-lock";
 import { prisma } from "@/lib/prisma";
+
+const AUTO_INVOICE_BILLING_LOCK_MESSAGE =
+  "自動発行処理中のため請求設定は変更できません。しばらく待ってから再度保存してください。";
+
+class AutoInvoiceBillingSettingsLockedError extends Error {
+  constructor() {
+    super(AUTO_INVOICE_BILLING_LOCK_MESSAGE);
+  }
+}
 
 export async function PATCH(
   request: Request,
@@ -80,7 +90,13 @@ export async function PATCH(
 
     const existing = await prisma.customers.findUnique({
       where: { id },
-      select: { id: true },
+      select: {
+        id: true,
+        billing_closing_day: true,
+        billing_closing_month_end: true,
+        billing_issue_day: true,
+        billing_issue_month_end: true,
+      },
     });
 
     if (!existing) {
@@ -90,27 +106,80 @@ export async function PATCH(
       );
     }
 
-    const duplicate = await prisma.customers.findFirst({
-      where: {
-        AND: [
-          { id: { not: id } },
-          {
-            OR: [{ code }, { name }],
-          },
-        ],
-      },
-      select: {
-        id: true,
-        code: true,
-        name: true,
-      },
+    const hasBillingSettingsChange =
+      existing.billing_closing_day !== billingClosingDay ||
+      existing.billing_closing_month_end !==
+        billingClosingMonthEnd ||
+      existing.billing_issue_day !== billingIssueDay ||
+      existing.billing_issue_month_end !== billingIssueMonthEnd;
+
+    const updateResult = await prisma.$transaction(async (transaction) => {
+      if (hasBillingSettingsChange) {
+        const lockAcquired =
+          await tryAcquireAutoInvoiceTransactionLock(transaction);
+
+        if (!lockAcquired) {
+          throw new AutoInvoiceBillingSettingsLockedError();
+        }
+      }
+
+      const duplicate = await transaction.customers.findFirst({
+        where: {
+          AND: [
+            { id: { not: id } },
+            {
+              OR: [{ code }, { name }],
+            },
+          ],
+        },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+        },
+      });
+
+      if (duplicate) {
+        return {
+          type: "duplicate" as const,
+          duplicate,
+        };
+      }
+
+      const customer = await transaction.customers.update({
+        where: { id },
+        data: {
+          code,
+          name,
+          billing_closing_day: billingClosingDay,
+          billing_closing_month_end: billingClosingMonthEnd,
+          billing_issue_day: billingIssueDay,
+          billing_issue_month_end: billingIssueMonthEnd,
+          show_material_on_delivery: Boolean(body.show_material_on_delivery),
+        },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          billing_closing_day: true,
+          billing_closing_month_end: true,
+          billing_issue_day: true,
+          billing_issue_month_end: true,
+          show_material_on_delivery: true,
+        },
+      });
+
+      return {
+        type: "updated" as const,
+        customer,
+      };
     });
 
-    if (duplicate) {
+    if (updateResult.type === "duplicate") {
       return NextResponse.json(
         {
           error:
-            duplicate.code === code
+            updateResult.duplicate.code === code
               ? "歯科医院コードが既に登録されています"
               : "同じ歯科医院名が既に登録されています",
         },
@@ -118,31 +187,15 @@ export async function PATCH(
       );
     }
 
-    const customer = await prisma.customers.update({
-      where: { id },
-      data: {
-        code,
-        name,
-        billing_closing_day: billingClosingDay,
-        billing_closing_month_end: billingClosingMonthEnd,
-        billing_issue_day: billingIssueDay,
-        billing_issue_month_end: billingIssueMonthEnd,
-        show_material_on_delivery: Boolean(body.show_material_on_delivery),
-      },
-      select: {
-        id: true,
-        code: true,
-        name: true,
-        billing_closing_day: true,
-        billing_closing_month_end: true,
-        billing_issue_day: true,
-        billing_issue_month_end: true,
-        show_material_on_delivery: true,
-      },
-    });
-
-    return NextResponse.json(customer);
+    return NextResponse.json(updateResult.customer);
   } catch (error) {
+    if (error instanceof AutoInvoiceBillingSettingsLockedError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 409 }
+      );
+    }
+
     console.error("Failed to update customer", error);
 
     return NextResponse.json(

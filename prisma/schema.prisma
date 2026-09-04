@@ -98,6 +98,9 @@ model invoices {
   pdf_path               String?
   pdf_filename           String?
   pdf_saved_at           DateTime?            @db.Timestamp(6)
+  issue_source           String?
+  auto_issued_at         DateTime?            @db.Timestamp(6)
+  auto_notice_seen_at    DateTime?            @db.Timestamp(6)
   updated_at             DateTime             @default(now()) @db.Timestamp(6)
   invoice_deliveries     invoice_deliveries[]
   invoice_items          invoice_items[]
