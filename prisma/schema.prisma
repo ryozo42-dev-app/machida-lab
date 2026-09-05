@@ -177,13 +177,14 @@ model private_items {
 }
 
 model users {
-  id            Int       @id @default(autoincrement())
-  login_id      String?   @unique @db.VarChar(100)
-  user_name     String?   @db.VarChar(100)
-  password_hash String?
-  role          String?   @db.VarChar(20)
-  created_at    DateTime? @default(now()) @db.Timestamp(6)
-  user_sessions user_sessions[]
+  id                   Int                    @id @default(autoincrement())
+  login_id             String?                @unique @db.VarChar(100)
+  user_name            String?                @db.VarChar(100)
+  password_hash        String?
+  role                 String?                @db.VarChar(20)
+  created_at           DateTime?              @default(now()) @db.Timestamp(6)
+  user_sessions        user_sessions[]
+  email_otp_challenges email_otp_challenges[]
 }
 
 model user_sessions {
@@ -197,6 +198,23 @@ model user_sessions {
 
   @@index([user_id], map: "idx_user_sessions_user_id")
   @@index([expires_at], map: "idx_user_sessions_expires_at")
+}
+
+model email_otp_challenges {
+  id                   Int       @id @default(autoincrement())
+  user_id              Int
+  otp_hash             String
+  challenge_token_hash String    @unique
+  expires_at           DateTime  @db.Timestamp(6)
+  consumed_at          DateTime? @db.Timestamp(6)
+  invalidated_at       DateTime? @db.Timestamp(6)
+  attempt_count        Int       @default(0)
+  last_sent_at         DateTime  @db.Timestamp(6)
+  created_at           DateTime  @default(now()) @db.Timestamp(6)
+  users                users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id], map: "idx_email_otp_challenges_user_id")
+  @@index([expires_at], map: "idx_email_otp_challenges_expires_at")
 }
 
 model materials {

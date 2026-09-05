@@ -18,10 +18,28 @@ async function readErrorMessage(response: Response) {
   }
 }
 
+function isOtpRequiredResponse(
+  data: unknown
+): data is { requires_otp: true; challenge_token: string } {
+  if (data === null || typeof data !== "object") {
+    return false;
+  }
+
+  const record = data as Record<string, unknown>;
+
+  return (
+    record.requires_otp === true &&
+    typeof record.challenge_token === "string" &&
+    record.challenge_token.length > 0
+  );
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [otp, setOtp] = useState("");
+  const [challengeToken, setChallengeToken] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
@@ -82,6 +100,14 @@ export default function LoginPage() {
         throw new Error(await readErrorMessage(response));
       }
 
+      const data = (await response.json()) as unknown;
+
+      if (isOtpRequiredResponse(data)) {
+        setChallengeToken(data.challenge_token);
+        setOtp("");
+        return;
+      }
+
       router.replace("/");
     } catch (error) {
       setErrorMessage(
@@ -93,6 +119,55 @@ export default function LoginPage() {
       setIsSubmitting(false);
     }
   };
+
+  const handleOtpSubmit = async (
+    event: FormEvent<HTMLFormElement>
+  ) => {
+    event.preventDefault();
+
+    if (isSubmitting || !challengeToken) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorMessage("");
+
+    try {
+      const response = await fetch("/api/auth/otp/verify", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          challenge_token: challengeToken,
+          otp,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response));
+      }
+
+      router.replace("/");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "認証に失敗しました"
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleBackToLogin = () => {
+    setChallengeToken("");
+    setOtp("");
+    setErrorMessage("");
+    setIsSubmitting(false);
+  };
+
+  const isOtpStep = challengeToken !== "";
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-white px-5 py-10 text-[#222222]">
@@ -128,58 +203,110 @@ export default function LoginPage() {
           </div>
 
           <h1 className="mt-7 text-2xl font-bold text-[#222222]">
-            ログイン
+            {isOtpStep ? "認証コード入力" : "ログイン"}
           </h1>
 
-          <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-semibold text-[#555555]">
-                メールアドレス
-              </span>
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                autoComplete="email"
-                disabled={isSubmitting || isCheckingSession}
-                className="h-11 rounded-[8px] border border-[#D8D8D8] bg-white px-3 text-base text-[#222222] outline-none transition-colors placeholder:text-[#AAAAAA] focus:border-[#222222] disabled:bg-[#F5F5F5]"
-                required
-              />
-            </label>
-
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-semibold text-[#555555]">
-                パスワード
-              </span>
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete="current-password"
-                disabled={isSubmitting || isCheckingSession}
-                className="h-11 rounded-[8px] border border-[#D8D8D8] bg-white px-3 text-base text-[#222222] outline-none transition-colors placeholder:text-[#AAAAAA] focus:border-[#222222] disabled:bg-[#F5F5F5]"
-                required
-              />
-            </label>
-
-            {errorMessage ? (
-              <div className="rounded-[8px] border border-[#D9D9D9] bg-white px-4 py-3 text-sm font-semibold text-[#222222]">
-                {errorMessage}
-              </div>
-            ) : null}
-
-            <button
-              type="submit"
-              disabled={isSubmitting || isCheckingSession}
-              className="h-11 w-full rounded-[8px] bg-[#fff362] px-5 text-sm font-bold text-[#222222] transition-colors hover:bg-[#fff362] disabled:cursor-not-allowed disabled:bg-[#BDBDBD]"
+          {isOtpStep ? (
+            <form
+              className="mt-6 space-y-5"
+              onSubmit={handleOtpSubmit}
             >
-              {isSubmitting
-                ? "ログイン中..."
-                : isCheckingSession
-                  ? "確認中..."
-                  : "ログイン"}
-            </button>
-          </form>
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-semibold text-[#555555]">
+                  認証コード
+                </span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  value={otp}
+                  onChange={(event) =>
+                    setOtp(
+                      event.target.value.replace(/\D/g, "").slice(0, 6)
+                    )
+                  }
+                  autoComplete="one-time-code"
+                  disabled={isSubmitting}
+                  className="h-11 rounded-[8px] border border-[#D8D8D8] bg-white px-3 text-base text-[#222222] outline-none transition-colors placeholder:text-[#AAAAAA] focus:border-[#222222] disabled:bg-[#F5F5F5]"
+                  required
+                />
+              </label>
+
+              {errorMessage ? (
+                <div className="rounded-[8px] border border-[#D9D9D9] bg-white px-4 py-3 text-sm font-semibold text-[#222222]">
+                  {errorMessage}
+                </div>
+              ) : null}
+
+              <button
+                type="submit"
+                disabled={isSubmitting || otp.length !== 6}
+                className="h-11 w-full rounded-[8px] bg-[#fff362] px-5 text-sm font-bold text-[#222222] transition-colors hover:bg-[#fff362] disabled:cursor-not-allowed disabled:bg-[#BDBDBD]"
+              >
+                {isSubmitting ? "認証中..." : "認証する"}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleBackToLogin}
+                disabled={isSubmitting}
+                className="h-11 w-full rounded-[8px] border border-[#D8D8D8] bg-white px-5 text-sm font-bold text-[#222222] transition-colors hover:bg-[#F7F7F7] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#999999]"
+              >
+                ログイン画面に戻る
+              </button>
+            </form>
+          ) : (
+            <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-semibold text-[#555555]">
+                  メールアドレス
+                </span>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  autoComplete="email"
+                  disabled={isSubmitting || isCheckingSession}
+                  className="h-11 rounded-[8px] border border-[#D8D8D8] bg-white px-3 text-base text-[#222222] outline-none transition-colors placeholder:text-[#AAAAAA] focus:border-[#222222] disabled:bg-[#F5F5F5]"
+                  required
+                />
+              </label>
+
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-semibold text-[#555555]">
+                  パスワード
+                </span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  autoComplete="current-password"
+                  disabled={isSubmitting || isCheckingSession}
+                  className="h-11 rounded-[8px] border border-[#D8D8D8] bg-white px-3 text-base text-[#222222] outline-none transition-colors placeholder:text-[#AAAAAA] focus:border-[#222222] disabled:bg-[#F5F5F5]"
+                  required
+                />
+              </label>
+
+              {errorMessage ? (
+                <div className="rounded-[8px] border border-[#D9D9D9] bg-white px-4 py-3 text-sm font-semibold text-[#222222]">
+                  {errorMessage}
+                </div>
+              ) : null}
+
+              <button
+                type="submit"
+                disabled={isSubmitting || isCheckingSession}
+                className="h-11 w-full rounded-[8px] bg-[#fff362] px-5 text-sm font-bold text-[#222222] transition-colors hover:bg-[#fff362] disabled:cursor-not-allowed disabled:bg-[#BDBDBD]"
+              >
+                {isSubmitting
+                  ? "ログイン中..."
+                  : isCheckingSession
+                    ? "確認中..."
+                    : "ログイン"}
+              </button>
+            </form>
+          )}
         </div>
       </section>
     </main>
