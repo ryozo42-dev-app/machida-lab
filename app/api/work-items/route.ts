@@ -266,14 +266,114 @@ export async function GET(request: Request) {
      * 自費
      * ============================================================
      *
-     * 現時点では自費用DBが存在しないため、
-     * 空配列を返す。
+     * DB構造
      *
-     * 自費DB完成後にここを実装する。
+     * private_categories
+     *        ↓
+     * private_sub_categories.category_id
+     *        ↓
+     * private_item_masters.sub_category_id
      */
 
     if (type === "private") {
-      return NextResponse.json([]);
+      if (
+        categoryIdParam === null ||
+        categoryIdParam.trim() === ""
+      ) {
+        const categories =
+          await prisma.$queryRaw<CategoryRow[]>`
+            SELECT
+              id,
+              name,
+              sort_order
+            FROM private_categories
+            WHERE is_active = true
+            ORDER BY sort_order ASC, id ASC
+          `;
+
+        return NextResponse.json(
+          categories.map((category) => ({
+            id: category.id,
+            name: category.name,
+            type,
+            level: "category",
+          }))
+        );
+      }
+
+      if (
+        !Number.isInteger(categoryId) ||
+        categoryId <= 0
+      ) {
+        return NextResponse.json(
+          { error: "Invalid category_id" },
+          { status: 400 }
+        );
+      }
+
+      if (
+        subCategoryIdParam === null ||
+        subCategoryIdParam.trim() === ""
+      ) {
+        const subCategories =
+          await prisma.$queryRaw<SubCategoryRow[]>`
+            SELECT
+              id,
+              category_id,
+              name,
+              sort_order
+            FROM private_sub_categories
+            WHERE
+              category_id = ${categoryId}
+              AND is_active = true
+            ORDER BY sort_order ASC, id ASC
+          `;
+
+        return NextResponse.json(
+          subCategories.map((subCategory) => ({
+            id: subCategory.id,
+            category_id: subCategory.category_id,
+            name: subCategory.name,
+            type,
+            level: "sub_category",
+          }))
+        );
+      }
+
+      if (
+        !Number.isInteger(subCategoryId) ||
+        subCategoryId <= 0
+      ) {
+        return NextResponse.json(
+          { error: "Invalid sub_category_id" },
+          { status: 400 }
+        );
+      }
+
+      const itemMasters =
+        await prisma.$queryRaw<ItemMasterRow[]>`
+          SELECT
+            id,
+            sub_category_id,
+            name,
+            sort_order
+          FROM private_item_masters
+          WHERE
+            sub_category_id = ${subCategoryId}
+            AND is_active = true
+          ORDER BY sort_order ASC, id ASC
+        `;
+
+      return NextResponse.json(
+        itemMasters.map((item) => ({
+          id: item.id,
+          sub_category_id: item.sub_category_id,
+          name: item.name,
+          item_name: item.name,
+          type,
+          level: "item",
+        }))
+      );
     }
 
     return NextResponse.json([]);

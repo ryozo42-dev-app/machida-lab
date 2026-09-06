@@ -370,6 +370,11 @@ export default function InvoicesPage() {
       return;
     }
 
+    if (["order", "work", "delivery"].includes(nextId)) {
+      router.push(`/?menu=${nextId}`);
+      return;
+    }
+
     router.push("/");
   };
 

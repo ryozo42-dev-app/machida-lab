@@ -12,10 +12,13 @@ export async function GET(request: Request) {
   const typeParam = searchParams.get("type");
   const insuranceItemIdParam = searchParams.get("insurance_item_id");
   const privateItemIdParam = searchParams.get("private_item_id");
+  const privateItemMasterIdParam = searchParams.get("private_item_master_id");
 
   const customerId = Number(customerIdParam);
   const insuranceItemId = insuranceItemIdParam === null ? null : Number(insuranceItemIdParam);
   const privateItemId = privateItemIdParam === null ? null : Number(privateItemIdParam);
+  const privateItemMasterId =
+    privateItemMasterIdParam === null ? null : Number(privateItemMasterIdParam);
 
   if (
     customerIdParam === null ||
@@ -56,9 +59,48 @@ export async function GET(request: Request) {
     });
   }
 
+  const hasPrivateItemId =
+    privateItemIdParam !== null && privateItemIdParam.trim() !== "";
+  const hasPrivateItemMasterId =
+    privateItemMasterIdParam !== null &&
+    privateItemMasterIdParam.trim() !== "";
+
+  if (hasPrivateItemId && hasPrivateItemMasterId) {
+    return NextResponse.json(
+      { error: "Only one of private_item_id or private_item_master_id can be specified" },
+      { status: 400 }
+    );
+  }
+
+  if (!hasPrivateItemId && !hasPrivateItemMasterId) {
+    return NextResponse.json({ error: "private_item_id is required" }, { status: 400 });
+  }
+
+  if (hasPrivateItemMasterId) {
+    if (
+      !Number.isInteger(privateItemMasterId) ||
+      privateItemMasterId === null ||
+      privateItemMasterId <= 0
+    ) {
+      return NextResponse.json({ error: "private_item_master_id is required" }, { status: 400 });
+    }
+
+    const priceRow = await prisma.customer_private_prices.findFirst({
+      where: {
+        customer_id: customerId,
+        private_item_master_id: privateItemMasterId,
+      },
+      select: {
+        price: true,
+      },
+    });
+
+    return NextResponse.json({
+      price: priceRow ? Number(priceRow.price) : null,
+    });
+  }
+
   if (
-    privateItemIdParam === null ||
-    privateItemIdParam.trim() === "" ||
     !Number.isInteger(privateItemId) ||
     privateItemId === null ||
     privateItemId <= 0

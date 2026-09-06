@@ -154,8 +154,22 @@ export async function GET(request: NextRequest) {
         )
       ),
     ];
+    const privateItemMasterIds = [
+      ...new Set(
+        orderItems.flatMap((item) =>
+          item.private_item_master_id === null ? [] : [item.private_item_master_id]
+        )
+      ),
+    ];
 
-    const [insuranceItems, privateItems, insurancePriceRows, privatePriceRows] =
+    const [
+      insuranceItems,
+      privateItems,
+      privateItemMasters,
+      insurancePriceRows,
+      privatePriceRows,
+      privateMasterPriceRows,
+    ] =
       await Promise.all([
         insuranceItemIds.length === 0
           ? Promise.resolve([] as Array<{ id: number; item_name: string }>)
@@ -182,6 +196,17 @@ export async function GET(request: NextRequest) {
             standard_price: true,
           },
         }),
+        prisma.private_item_masters.findMany({
+          where: {
+            id: {
+              in: privateItemMasterIds,
+            },
+          },
+          select: {
+            id: true,
+            name: true,
+          },
+        }),
         prisma.customer_insurance_prices.findMany({
           where: {
             customer_id: {
@@ -204,11 +229,28 @@ export async function GET(request: NextRequest) {
             },
             private_item_id: {
               in: privateItemIds,
+              not: null,
             },
           },
           select: {
             customer_id: true,
             private_item_id: true,
+            price: true,
+          },
+        }),
+        prisma.customer_private_prices.findMany({
+          where: {
+            customer_id: {
+              in: customerIds,
+            },
+            private_item_master_id: {
+              in: privateItemMasterIds,
+              not: null,
+            },
+          },
+          select: {
+            customer_id: true,
+            private_item_master_id: true,
             price: true,
           },
         }),
@@ -218,6 +260,9 @@ export async function GET(request: NextRequest) {
     const patientNames = new Map(patients.map((patient) => [patient.id, patient.patient_name]));
     const insuranceNames = new Map(insuranceItems.map((item) => [item.id, item.item_name]));
     const privateNames = new Map(privateItems.map((item) => [item.id, item.item_name]));
+    const privateMasterNames = new Map(
+      privateItemMasters.map((item) => [item.id, item.name])
+    );
     const standardPrivatePrices = new Map(
       privateItems.flatMap((item) =>
         item.standard_price === null ? [] : [[item.id, item.standard_price] as const]
@@ -226,6 +271,7 @@ export async function GET(request: NextRequest) {
 
     const insurancePriceByKey = new Map<string, Prisma.Decimal>();
     const privatePriceByKey = new Map<string, Prisma.Decimal>();
+    const privateMasterPriceByKey = new Map<string, Prisma.Decimal>();
 
     for (const row of insurancePriceRows) {
       const key = `${row.customer_id}:${row.insurance_item_id}`;
@@ -238,7 +284,26 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    for (const row of privateMasterPriceRows) {
+      if (row.private_item_master_id === null) {
+        continue;
+      }
+
+      const key = `${row.customer_id}:${row.private_item_master_id}`;
+      addUniquePrice(
+        privateMasterPriceByKey,
+        key,
+        row.private_item_master_id,
+        row.price,
+        "customer private master"
+      );
+    }
+
     for (const row of privatePriceRows) {
+      if (row.private_item_id === null) {
+        continue;
+      }
+
       const key = `${row.customer_id}:${row.private_item_id}`;
       addUniquePrice(
         privatePriceByKey,
@@ -265,18 +330,24 @@ export async function GET(request: NextRequest) {
 
       const hasInsuranceItem = item.insurance_item_id !== null;
       const hasPrivateItem = item.private_item_id !== null;
+      const hasPrivateItemMaster = item.private_item_master_id !== null;
 
-      if (hasInsuranceItem === hasPrivateItem) {
+      if (
+        [hasInsuranceItem, hasPrivateItem, hasPrivateItemMaster].filter(Boolean).length !== 1
+      ) {
         throw new Error(`order_item ${item.id} must reference exactly one work item`);
       }
 
       const quantity = item.quantity ?? 1;
       const insurancePriceKey = `${order.customer_id}:${item.insurance_item_id}`;
       const privatePriceKey = `${order.customer_id}:${item.private_item_id}`;
+      const privateMasterPriceKey = `${order.customer_id}:${item.private_item_master_id}`;
       const unitPrice = hasInsuranceItem
         ? insurancePriceByKey.get(insurancePriceKey)
-        : privatePriceByKey.get(privatePriceKey) ??
-          standardPrivatePrices.get(item.private_item_id as number);
+        : hasPrivateItem
+          ? privatePriceByKey.get(privatePriceKey) ??
+            standardPrivatePrices.get(item.private_item_id as number)
+          : privateMasterPriceByKey.get(privateMasterPriceKey);
       const amount = unitPrice ? unitPrice.mul(quantity) : null;
 
       return {
@@ -291,7 +362,9 @@ export async function GET(request: NextRequest) {
           item.work_name?.trim() ||
           (hasInsuranceItem
             ? insuranceNames.get(item.insurance_item_id as number) ?? "未登録"
-            : privateNames.get(item.private_item_id as number) ?? "未登録"),
+            : hasPrivateItem
+              ? privateNames.get(item.private_item_id as number) ?? "未登録"
+              : privateMasterNames.get(item.private_item_master_id as number) ?? "未登録"),
         tooth_numbers: teethByOrderId.get(order.id) ?? [],
         delivery_date: order.delivery_date ? formatDate(order.delivery_date) : null,
         quantity,

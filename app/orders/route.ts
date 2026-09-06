@@ -98,6 +98,8 @@ async function parseOrderBody(req: NextRequest) {
 
     private_item_id: formData.get("private_item_id"),
 
+    private_item_master_id: formData.get("private_item_master_id"),
+
     work_name: String(
       formData.get("work_name") ?? ""
     ),
@@ -176,6 +178,7 @@ export async function POST(req: NextRequest) {
       patient_id: body.patient_id,
       insurance_item_id: body.insurance_item_id,
       private_item_id: body.private_item_id,
+      private_item_master_id: body.private_item_master_id,
       work_name: body.work_name,
       base_up_support_target: body.base_up_support_target,
       price: body.price,
@@ -212,6 +215,11 @@ export async function POST(req: NextRequest) {
     const privateItemId =
       parseOptionalPositiveInt(
         body.private_item_id
+      );
+
+    const privateItemMasterId =
+      parseOptionalPositiveInt(
+        body.private_item_master_id
       );
 
     const unitPrice =
@@ -359,14 +367,17 @@ export async function POST(req: NextRequest) {
     const hasPrivateItem =
       privateItemId !== null;
 
+    const hasPrivateItemMaster =
+      privateItemMasterId !== null;
+
     if (
-      hasInsuranceItem ===
-      hasPrivateItem
+      [hasInsuranceItem, hasPrivateItem, hasPrivateItemMaster].filter(Boolean)
+        .length !== 1
     ) {
       return NextResponse.json(
         {
           error:
-            "Exactly one of insurance_item_id or private_item_id must be specified",
+            "Exactly one of insurance_item_id, private_item_id or private_item_master_id must be specified",
         },
         {
           status: 400,
@@ -476,6 +487,36 @@ export async function POST(req: NextRequest) {
           {
             error:
               "Invalid private_item_id",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+    }
+
+    /*
+     * 新自費項目存在確認
+     */
+    if (hasPrivateItemMaster) {
+      const privateItemMaster =
+        await prisma.private_item_masters.findUnique(
+          {
+            where: {
+              id: privateItemMasterId!,
+            },
+
+            select: {
+              id: true,
+            },
+          }
+        );
+
+      if (!privateItemMaster) {
+        return NextResponse.json(
+          {
+            error:
+              "Invalid private_item_master_id",
           },
           {
             status: 400,
@@ -652,12 +693,77 @@ export async function POST(req: NextRequest) {
           }
 
           /*
+           * ======================================
+           * 医院別新自費価格
+           * ======================================
+           */
+          if (
+            hasPrivateItemMaster &&
+            unitPrice !== null
+          ) {
+            const existingCustomerPrivatePrice =
+              await transaction.$queryRaw<
+                Array<{
+                  exists: boolean;
+                }>
+              >`
+                SELECT EXISTS (
+                  SELECT 1
+                  FROM customer_private_prices
+                  WHERE
+                    customer_id =
+                      ${body.customer_id}
+                    AND
+                    private_item_master_id =
+                      ${privateItemMasterId}
+                ) AS exists
+              `;
+
+            if (
+              !existingCustomerPrivatePrice[0]
+                ?.exists
+            ) {
+              console.error("[POST /orders] transaction step: customer_private_prices insert start", {
+                customer_id: body.customer_id,
+                private_item_master_id: privateItemMasterId,
+                price: unitPrice,
+              });
+
+              await transaction.$executeRaw`
+                INSERT INTO
+                  customer_private_prices
+                  (
+                    customer_id,
+                    private_item_id,
+                    private_item_master_id,
+                    price
+                  )
+                VALUES
+                  (
+                    ${body.customer_id},
+                    ${null},
+                    ${privateItemMasterId},
+                    ${unitPrice}
+                  )
+              `;
+
+              console.error("[POST /orders] transaction step: customer_private_prices insert success");
+            } else {
+              console.error("[POST /orders] transaction step: customer_private_prices already exists", {
+                customer_id: body.customer_id,
+                private_item_master_id: privateItemMasterId,
+              });
+            }
+          }
+
+          /*
            * order_items
            */
           console.error("[POST /orders] transaction step: order_items.create() start", {
             order_id: createdOrder.id,
             insurance_item_id: hasInsuranceItem ? insuranceItemId : null,
             private_item_id: hasPrivateItem ? privateItemId : null,
+            private_item_master_id: hasPrivateItemMaster ? privateItemMasterId : null,
             quantity,
             unit_price: unitPrice ?? undefined,
           });
@@ -676,6 +782,11 @@ export async function POST(req: NextRequest) {
                 private_item_id:
                   hasPrivateItem
                     ? privateItemId
+                    : null,
+
+                private_item_master_id:
+                  hasPrivateItemMaster
+                    ? privateItemMasterId
                     : null,
 
                 work_name:

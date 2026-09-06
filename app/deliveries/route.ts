@@ -191,6 +191,7 @@ export async function POST(request: NextRequest) {
             order_id: true,
             insurance_item_id: true,
             private_item_id: true,
+            private_item_master_id: true,
             quantity: true,
           },
         });
@@ -279,7 +280,10 @@ export async function POST(request: NextRequest) {
         const privateItemIds = orderItems.flatMap((item) =>
           item.private_item_id === null ? [] : [item.private_item_id]
         );
-        const [insurancePriceRows, privatePriceRows, privateItems] =
+        const privateItemMasterIds = orderItems.flatMap((item) =>
+          item.private_item_master_id === null ? [] : [item.private_item_master_id]
+        );
+        const [insurancePriceRows, privatePriceRows, privateMasterPriceRows, privateItems] =
           await Promise.all([
             transaction.customer_insurance_prices.findMany({
               where: {
@@ -298,10 +302,24 @@ export async function POST(request: NextRequest) {
                 customer_id: customerId,
                 private_item_id: {
                   in: privateItemIds,
+                  not: null,
                 },
               },
               select: {
                 private_item_id: true,
+                price: true,
+              },
+            }),
+            transaction.customer_private_prices.findMany({
+              where: {
+                customer_id: customerId,
+                private_item_master_id: {
+                  in: privateItemMasterIds,
+                  not: null,
+                },
+              },
+              select: {
+                private_item_master_id: true,
                 price: true,
               },
             }),
@@ -316,9 +334,10 @@ export async function POST(request: NextRequest) {
                 standard_price: true,
               },
             }),
-          ]);
+        ]);
         const insurancePrices = new Map<number, Prisma.Decimal>();
         const privatePrices = new Map<number, Prisma.Decimal>();
+        const privateMasterPrices = new Map<number, Prisma.Decimal>();
         const standardPrivatePrices = new Map(
           privateItems.flatMap((item) =>
             item.standard_price === null ? [] : [[item.id, item.standard_price] as const]
@@ -335,6 +354,10 @@ export async function POST(request: NextRequest) {
         }
 
         for (const row of privatePriceRows) {
+          if (row.private_item_id === null) {
+            continue;
+          }
+
           addUniquePrice(
             privatePrices,
             row.private_item_id,
@@ -343,11 +366,27 @@ export async function POST(request: NextRequest) {
           );
         }
 
+        for (const row of privateMasterPriceRows) {
+          if (row.private_item_master_id === null) {
+            continue;
+          }
+
+          addUniquePrice(
+            privateMasterPrices,
+            row.private_item_master_id,
+            row.price,
+            "customer private master"
+          );
+        }
+
         const resolvedItems = orderItems.map((orderItem) => {
           const hasInsuranceItem = orderItem.insurance_item_id !== null;
           const hasPrivateItem = orderItem.private_item_id !== null;
+          const hasPrivateItemMaster = orderItem.private_item_master_id !== null;
 
-          if (hasInsuranceItem === hasPrivateItem) {
+          if (
+            [hasInsuranceItem, hasPrivateItem, hasPrivateItemMaster].filter(Boolean).length !== 1
+          ) {
             throw new DeliveryRequestError(
               `order_item ${orderItem.id} の作業内容設定が不正です`,
               409
@@ -356,8 +395,10 @@ export async function POST(request: NextRequest) {
 
           const unitPrice = hasInsuranceItem
             ? insurancePrices.get(orderItem.insurance_item_id as number)
-            : privatePrices.get(orderItem.private_item_id as number) ??
-              standardPrivatePrices.get(orderItem.private_item_id as number);
+            : hasPrivateItem
+              ? privatePrices.get(orderItem.private_item_id as number) ??
+                standardPrivatePrices.get(orderItem.private_item_id as number)
+              : privateMasterPrices.get(orderItem.private_item_master_id as number);
 
           if (unitPrice === undefined) {
             throw new DeliveryRequestError(

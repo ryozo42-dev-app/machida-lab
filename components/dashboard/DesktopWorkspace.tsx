@@ -50,9 +50,21 @@ const dockItems: DockItem[] = [
   },
 ];
 
+const initialMenuIds = new Set(["order", "work", "delivery", "manage"]);
+
+function getInitialActiveId() {
+  if (typeof window === "undefined") {
+    return "dashboard";
+  }
+
+  const menu = new URL(window.location.href).searchParams.get("menu");
+
+  return menu !== null && initialMenuIds.has(menu) ? menu : "dashboard";
+}
+
 export default function DesktopWorkspace() {
   const router = useRouter();
-  const [activeId, setActiveId] = useState("dashboard");
+  const [activeId, setActiveId] = useState(getInitialActiveId);
   const [previousId, setPreviousId] = useState<string | null>(null);
   const [transitionPhase, setTransitionPhase] = useState<"idle" | "fadeOut" | "fadeIn">("idle");
   const workspaceRef = useRef<HTMLElement>(null);
@@ -106,9 +118,10 @@ export default function DesktopWorkspace() {
 
   useEffect(() => {
     const url = new URL(window.location.href);
+    const menu = url.searchParams.get("menu");
 
-    if (url.searchParams.get("menu") === "manage") {
-      setActiveId("manage");
+    if (menu !== null && initialMenuIds.has(menu)) {
+      setActiveId(menu);
       url.searchParams.delete("menu");
 
       window.history.replaceState(

@@ -150,15 +150,18 @@ function formatToothDisplay(value: string) {
     if (directMatch) {
       const quadrant = Number(directMatch[1]);
       const toothNumber = directMatch[2];
+      const deciduousTooth =
+        quadrant >= 5 ? ["", "A", "B", "C", "D", "E"][Number(toothNumber)] : null;
+      const displayTooth = deciduousTooth ?? toothNumber;
 
-      if (quadrant === 1) return `右上${toothNumber}`;
-      if (quadrant === 2) return `左上${toothNumber}`;
-      if (quadrant === 3) return `左下${toothNumber}`;
-      if (quadrant === 4) return `右下${toothNumber}`;
-      if (quadrant === 5) return `右上${toothNumber}`;
-      if (quadrant === 6) return `左上${toothNumber}`;
-      if (quadrant === 7) return `左下${toothNumber}`;
-      if (quadrant === 8) return `右下${toothNumber}`;
+      if (quadrant === 1) return `右上${displayTooth}`;
+      if (quadrant === 2) return `左上${displayTooth}`;
+      if (quadrant === 3) return `左下${displayTooth}`;
+      if (quadrant === 4) return `右下${displayTooth}`;
+      if (quadrant === 5) return `右上${displayTooth}`;
+      if (quadrant === 6) return `左上${displayTooth}`;
+      if (quadrant === 7) return `左下${displayTooth}`;
+      if (quadrant === 8) return `右下${displayTooth}`;
     }
 
     const positionMatch = token.match(/^(上顎|下顎)[\s　]*(右|左)[\s　]*([0-9A-Z])$/);
@@ -654,7 +657,7 @@ function OrderEntryModal() {
   }, [customerId, selectedWorkItem, workItemQuery, workItemType]);
 
   useEffect(() => {
-    if (customerId === null || workItemType !== "insurance") {
+    if (customerId === null) {
       setInsuranceCategories([]);
       setSelectedCategoryId("");
       setInsuranceSubCategories([]);
@@ -672,7 +675,7 @@ function OrderEntryModal() {
     const loadInsuranceCategories = async () => {
       try {
         const response = await fetch(
-          `/api/work-items?customer_id=${customerId}&type=insurance`,
+          `/api/work-items?customer_id=${customerId}&type=${workItemType}`,
           { signal: controller.signal }
         );
 
@@ -698,10 +701,6 @@ function OrderEntryModal() {
   }, [customerId, workItemType]);
 
   useEffect(() => {
-    if (workItemType !== "insurance") {
-      return;
-    }
-
     if (selectedCategoryId === "") {
       setInsuranceSubCategories([]);
       setSelectedSubCategoryId("");
@@ -718,7 +717,7 @@ function OrderEntryModal() {
     const loadInsuranceSubCategories = async () => {
       try {
         const response = await fetch(
-          `/api/work-items?customer_id=${customerId}&type=insurance&category_id=${selectedCategoryId}`,
+          `/api/work-items?customer_id=${customerId}&type=${workItemType}&category_id=${selectedCategoryId}`,
           { signal: controller.signal }
         );
 
@@ -744,10 +743,6 @@ function OrderEntryModal() {
   }, [customerId, selectedCategoryId, workItemType]);
 
   useEffect(() => {
-    if (workItemType !== "insurance") {
-      return;
-    }
-
     if (selectedSubCategoryId === "") {
       setInsuranceItemMasters([]);
       setSelectedItemId("");
@@ -762,7 +757,7 @@ function OrderEntryModal() {
     const loadInsuranceItemMasters = async () => {
       try {
         const response = await fetch(
-          `/api/work-items?customer_id=${customerId}&type=insurance&category_id=${selectedCategoryId}&sub_category_id=${selectedSubCategoryId}`,
+          `/api/work-items?customer_id=${customerId}&type=${workItemType}&category_id=${selectedCategoryId}&sub_category_id=${selectedSubCategoryId}`,
           { signal: controller.signal }
         );
 
@@ -835,7 +830,7 @@ function OrderEntryModal() {
     if (selectedWorkItem.type === "insurance") {
       query.set("insurance_item_id", String(selectedWorkItem.id));
     } else {
-      query.set("private_item_id", String(selectedWorkItem.id));
+      query.set("private_item_master_id", String(selectedWorkItem.id));
     }
 
     const loadCustomerPrice = async () => {
@@ -977,7 +972,7 @@ function OrderEntryModal() {
     if (selectedWorkItem.type === "insurance") {
       formData.append("insurance_item_id", String(selectedWorkItem.id));
     } else {
-      formData.append("private_item_id", String(selectedWorkItem.id));
+      formData.append("private_item_master_id", String(selectedWorkItem.id));
     }
     formData.append("work_name", selectedWorkItem.item_name);
     formData.append("base_up_support_target", String(baseUpSupport));
@@ -1234,12 +1229,18 @@ function OrderEntryModal() {
                     type="radio"
                     name="work_item_type"
                     checked={workItemType === "insurance"}
-                    onChange={() => {
-                      setWorkItemType("insurance");
-                      setSelectedWorkItem(null);
-                      setWorkItemCandidates([]);
-                      setWorkItemError("");
-                    }}
+	                    onChange={() => {
+	                      setWorkItemType("insurance");
+	                      setSelectedCategoryId("");
+	                      setSelectedSubCategoryId("");
+	                      setSelectedItemId("");
+	                      setDisplayWorkName("");
+	                      setPrice("");
+	                      setSelectedWorkItem(null);
+	                      setWorkItemCandidates([]);
+	                      setWorkItemError("");
+	                      setWorkItemQuery("");
+	                    }}
                     className="h-3.5 w-3.5 accent-[#fff362]"
                   />
                   保険
@@ -1249,12 +1250,18 @@ function OrderEntryModal() {
                     type="radio"
                     name="work_item_type"
                     checked={workItemType === "private"}
-                    onChange={() => {
-                      setWorkItemType("private");
-                      setSelectedWorkItem(null);
-                      setWorkItemCandidates([]);
-                      setWorkItemError("");
-                    }}
+	                    onChange={() => {
+	                      setWorkItemType("private");
+	                      setSelectedCategoryId("");
+	                      setSelectedSubCategoryId("");
+	                      setSelectedItemId("");
+	                      setDisplayWorkName("");
+	                      setPrice("");
+	                      setSelectedWorkItem(null);
+	                      setWorkItemCandidates([]);
+	                      setWorkItemError("");
+	                      setWorkItemQuery("");
+	                    }}
                     className="h-3.5 w-3.5 accent-[#fff362]"
                   />
                   自費
@@ -1271,7 +1278,6 @@ function OrderEntryModal() {
                 </label>
               </div>
 
-              {workItemType === "insurance" ? (
                 <div className="mt-2 flex w-full flex-col gap-2">
                   <div className="flex w-full max-w-full flex-nowrap items-center gap-2">
                     <select
@@ -1341,11 +1347,11 @@ function OrderEntryModal() {
 
                         const nextName = `${selectedSubCategory?.name ?? ""} ${selectedItem.name}`.trim();
                         setDisplayWorkName(nextName);
-                        setSelectedWorkItem({
-                          id: selectedItem.id,
-                          item_name: nextName,
-                          type: "insurance",
-                        });
+	                        setSelectedWorkItem({
+	                          id: selectedItem.id,
+	                          item_name: nextName,
+	                          type: workItemType,
+	                        });
                         setWorkItemQuery(nextName);
                       }}
                       disabled={selectedSubCategoryId === "" || insuranceItemMasters.length === 0}
@@ -1379,54 +1385,9 @@ function OrderEntryModal() {
                         placeholder="0"
                         className="mt-1 h-8 w-full rounded-md border border-[#E2E2E2] bg-white px-2 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
                       />
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <input
-                    name="work_item_query"
-                    value={workItemQuery}
-                    onChange={(event) => {
-                      setWorkItemQuery(event.target.value);
-                      setSelectedWorkItem(null);
-                      setWorkItemError("");
-                    }}
-                    disabled={customerId === null}
-                    placeholder={customerId === null ? "歯科医院を先に選択してください" : "作業内容を入力"}
-                    className="mt-2 h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132] disabled:bg-[#FAFAFA] disabled:text-[#999999]"
-                  />
-
-                  {workItemError ? (
-                    <p className="mt-1 text-xs font-medium text-[#B42318]">{workItemError}</p>
-                  ) : null}
-
-                  {customerId !== null && workItemQuery.trim().length > 0 && !selectedWorkItem ? (
-                    <div className="mt-1 max-h-[72px] w-full overflow-y-auto rounded-xl border border-[#ECECEC] bg-white p-1">
-                      {isWorkItemLoading ? (
-                        <p className="px-3 py-1.5 text-xs text-[#666666]">検索中...</p>
-                      ) : workItemCandidates.length > 0 ? (
-                        workItemCandidates.map((item) => (
-                          <button
-                            key={`${item.type}-${item.id}`}
-                            type="button"
-                            onClick={() => {
-                              setSelectedWorkItem(item);
-                              setWorkItemQuery(item.item_name);
-                              setWorkItemCandidates([]);
-                            }}
-                            className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[#333333] hover:bg-[#FFF8EA]"
-                          >
-                            {item.item_name}
-                          </button>
-                        ))
-                      ) : (
-                        <p className="px-3 py-1.5 text-xs text-[#666666]">候補が見つかりません</p>
-                      )}
-                    </div>
-                  ) : null}
-                </>
-              )}
+	                    </div>
+	                  </div>
+	                </div>
             </div>
           </div>
 
@@ -1653,6 +1614,11 @@ function OrderEntryModal() {
           <input
             type="hidden"
             name="private_item_id"
+            value=""
+          />
+          <input
+            type="hidden"
+            name="private_item_master_id"
             value={selectedWorkItem?.type === "private" ? String(selectedWorkItem.id) : ""}
           />
           <input

@@ -225,6 +225,14 @@ function sortToothValues(values: ToothChartValue[]) {
   });
 }
 
+function formatToothChartPosition(quadrant: number, position: string) {
+  if (quadrant < 5) {
+    return position;
+  }
+
+  return ["", "A", "B", "C", "D", "E"][Number(position)] ?? position;
+}
+
 function createToothChart(teeth: DeliveryPdfTooth[]) {
   const chart = createEmptyToothChart();
 
@@ -241,7 +249,7 @@ function createToothChart(teeth: DeliveryPdfTooth[]) {
     const position = match[2];
 
     const value = {
-      value: position,
+      value: formatToothChartPosition(quadrant, position),
       isBridge: tooth.is_bridge,
     };
 

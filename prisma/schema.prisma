@@ -16,11 +16,15 @@ model customer_insurance_prices {
 }
 
 model customer_private_prices {
-  id              Int       @id @default(autoincrement())
-  customer_id     Int
-  private_item_id Int
-  price           Decimal   @db.Decimal(10, 2)
-  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  id                     Int                   @id @default(autoincrement())
+  customer_id            Int
+  private_item_id        Int?
+  private_item_master_id Int?
+  price                  Decimal               @db.Decimal(10, 2)
+  created_at             DateTime?             @default(now()) @db.Timestamp(6)
+  private_item_masters   private_item_masters? @relation(fields: [private_item_master_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_customer_private_prices_private_item_master")
+
+  @@unique([customer_id, private_item_master_id], map: "uq_customer_private_prices_customer_private_item_master")
 }
 
 model customers {
@@ -122,6 +126,7 @@ model order_items {
   order_id                               Int
   insurance_item_id                      Int?
   private_item_id                        Int?
+  private_item_master_id                 Int?
   quantity                               Int?                                     @default(1)
   unit_price                             Decimal?                                 @db.Decimal(10, 2)
   created_at                             DateTime?                                @default(now()) @db.Timestamp(6)
@@ -130,6 +135,7 @@ model order_items {
   customer_deposit_material_transactions customer_deposit_material_transactions[]
   delivery_items                         delivery_items?
   invoice_items                          invoice_items[]
+  private_item_masters                   private_item_masters?                    @relation(fields: [private_item_master_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_order_items_private_item_master")
 }
 
 model order_teeth {
@@ -174,6 +180,29 @@ model private_items {
   standard_price Decimal?  @db.Decimal(10, 2)
   created_at     DateTime? @default(now()) @db.Timestamp(6)
   sub_type       String?   @db.VarChar(200)
+}
+
+model private_categories {
+  id                     Int                      @id @default(autoincrement())
+  name                   String                   @unique @db.VarChar(100)
+  sort_order             Int                      @default(0)
+  is_active              Boolean                  @default(true)
+  created_at             DateTime?                @default(now()) @db.Timestamp(6)
+  private_sub_categories private_sub_categories[]
+}
+
+model private_item_masters {
+  id                     Int                    @id @default(autoincrement())
+  sub_category_id        Int
+  name                   String                 @db.VarChar(200)
+  sort_order             Int                    @default(0)
+  is_active              Boolean                @default(true)
+  created_at             DateTime?              @default(now()) @db.Timestamp(6)
+  customer_private_prices customer_private_prices[]
+  order_items            order_items[]
+  private_sub_categories private_sub_categories @relation(fields: [sub_category_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_private_item_masters_sub_category")
+
+  @@unique([sub_category_id, name], map: "uq_private_item_masters")
 }
 
 model users {
@@ -337,6 +366,19 @@ model insurance_sub_categories {
   insurance_categories   insurance_categories     @relation(fields: [category_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_insurance_sub_categories_category")
 
   @@unique([category_id, name], map: "uq_insurance_sub_categories")
+}
+
+model private_sub_categories {
+  id                   Int                    @id @default(autoincrement())
+  category_id          Int
+  name                 String                 @db.VarChar(100)
+  sort_order           Int                    @default(0)
+  is_active            Boolean                @default(true)
+  created_at           DateTime?              @default(now()) @db.Timestamp(6)
+  private_item_masters private_item_masters[]
+  private_categories   private_categories     @relation(fields: [category_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_private_sub_categories_category")
+
+  @@unique([category_id, name], map: "uq_private_sub_categories")
 }
 
 model invoice_deliveries {
