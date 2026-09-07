@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import ClinicModal from "./ClinicModal";
 import DocumentManagementPanel from "./DocumentManagementPanel";
+import PatientHistoryPanel from "./PatientHistoryPanel";
 import UserManagementPanel from "./UserManagementPanel";
+import WorkMasterManagementPanel from "./WorkMasterManagementPanel";
 
 type ManagementMenu = {
   id: string;
@@ -24,6 +26,7 @@ type Clinic = {
   billing_issue_day: number | null;
   billing_issue_month_end: boolean;
   show_material_on_delivery: boolean;
+  invoice_rounding_unit: number;
 };
 
 const managementMenus: ManagementMenu[] = [
@@ -41,6 +44,16 @@ const managementMenus: ManagementMenu[] = [
     id: "documents",
     title: "帳票管理",
     description: "納品書・請求書の検索・閲覧",
+  },
+  {
+    id: "workMaster",
+    title: "作業マスター管理",
+    description: "作業分類・医院別価格の管理",
+  },
+  {
+    id: "patientHistory",
+    title: "患者作業履歴",
+    description: "患者の過去2年間の作業履歴を検索・表示",
   },
 ];
 
@@ -310,6 +323,14 @@ export default function ManagementModal() {
 
   if (activeMenu === "user") {
     return <UserManagementPanel onBack={() => setActiveMenu(null)} />;
+  }
+
+  if (activeMenu === "workMaster") {
+    return <WorkMasterManagementPanel onBack={() => setActiveMenu(null)} />;
+  }
+
+  if (activeMenu === "patientHistory") {
+    return <PatientHistoryPanel onBack={() => setActiveMenu(null)} />;
   }
 
   return (

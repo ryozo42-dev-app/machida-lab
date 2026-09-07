@@ -92,6 +92,8 @@ type InsuranceItemOption = {
   level: "item";
 };
 
+type WorkItemMasterAddLevel = "category" | "sub_category" | "item";
+
 const permanentRight = ["8", "7", "6", "5", "4", "3", "2", "1"];
 const permanentLeft = ["1", "2", "3", "4", "5", "6", "7", "8"];
 const deciduousRight = ["E", "D", "C", "B", "A"];
@@ -545,11 +547,73 @@ function OrderEntryModal() {
   const [submitError, setSubmitError] = useState("");
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
   const [isPatientSuccessModalOpen, setIsPatientSuccessModalOpen] = useState(false);
+  const [addMasterLevel, setAddMasterLevel] = useState<WorkItemMasterAddLevel | null>(null);
+  const [addMasterName, setAddMasterName] = useState("");
+  const [addMasterError, setAddMasterError] = useState("");
+  const [isAddingMaster, setIsAddingMaster] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredPatients = patients.filter((patient) =>
     patient.patient_name.toLowerCase().includes(patientQuery.toLowerCase())
   );
+
+  const loadCategories = async (signal?: AbortSignal) => {
+    if (customerId === null) {
+      return [];
+    }
+
+    const response = await fetch(
+      `/api/work-items?customer_id=${customerId}&type=${workItemType}`,
+      { signal }
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch categories");
+    }
+
+    return (await response.json()) as InsuranceCategoryOption[];
+  };
+
+  const loadSubCategories = async (
+    categoryId: number,
+    signal?: AbortSignal
+  ) => {
+    if (customerId === null) {
+      return [];
+    }
+
+    const response = await fetch(
+      `/api/work-items?customer_id=${customerId}&type=${workItemType}&category_id=${categoryId}`,
+      { signal }
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch sub categories");
+    }
+
+    return (await response.json()) as InsuranceSubCategoryOption[];
+  };
+
+  const loadItemMasters = async (
+    categoryId: number,
+    subCategoryId: number,
+    signal?: AbortSignal
+  ) => {
+    if (customerId === null) {
+      return [];
+    }
+
+    const response = await fetch(
+      `/api/work-items?customer_id=${customerId}&type=${workItemType}&category_id=${categoryId}&sub_category_id=${subCategoryId}`,
+      { signal }
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch item masters");
+    }
+
+    return (await response.json()) as InsuranceItemOption[];
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -863,6 +927,132 @@ function OrderEntryModal() {
     return () => controller.abort();
   }, [customerId, selectedWorkItem]);
 
+  const openAddMasterDialog = (level: WorkItemMasterAddLevel) => {
+    setAddMasterLevel(level);
+    setAddMasterName("");
+    setAddMasterError("");
+  };
+
+  const closeAddMasterDialog = () => {
+    if (isAddingMaster) {
+      return;
+    }
+
+    setAddMasterLevel(null);
+    setAddMasterName("");
+    setAddMasterError("");
+  };
+
+  const submitAddMaster = async () => {
+    if (addMasterLevel === null || isAddingMaster) {
+      return;
+    }
+
+    const name = addMasterName.trim();
+
+    if (name.length === 0) {
+      setAddMasterError("名称を入力してください");
+      return;
+    }
+
+    if (addMasterLevel === "sub_category" && selectedCategoryId === "") {
+      setAddMasterError("大分類を選択してください");
+      return;
+    }
+
+    if (addMasterLevel === "item" && selectedSubCategoryId === "") {
+      setAddMasterError("中分類を選択してください");
+      return;
+    }
+
+    setIsAddingMaster(true);
+    setAddMasterError("");
+
+    try {
+      const endpoint =
+        addMasterLevel === "category"
+          ? "/api/work-item-masters/categories"
+          : addMasterLevel === "sub_category"
+            ? "/api/work-item-masters/sub-categories"
+            : "/api/work-item-masters/items";
+      const body =
+        addMasterLevel === "category"
+          ? { type: workItemType, name }
+          : addMasterLevel === "sub_category"
+            ? { type: workItemType, category_id: selectedCategoryId, name }
+            : { type: workItemType, sub_category_id: selectedSubCategoryId, name };
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(errorBody?.error ?? "項目の追加に失敗しました");
+      }
+
+      const created = (await response.json()) as
+        | InsuranceCategoryOption
+        | InsuranceSubCategoryOption
+        | InsuranceItemOption;
+
+      if (addMasterLevel === "category") {
+        const categories = await loadCategories();
+        setInsuranceCategories(categories);
+        setSelectedCategoryId(created.id);
+        setInsuranceSubCategories([]);
+        setSelectedSubCategoryId("");
+        setInsuranceItemMasters([]);
+        setSelectedItemId("");
+        setDisplayWorkName("");
+        setSelectedWorkItem(null);
+        setWorkItemQuery("");
+        setPrice("");
+      } else if (addMasterLevel === "sub_category") {
+        const categoryId = selectedCategoryId as number;
+        const subCategories = await loadSubCategories(categoryId);
+        setInsuranceSubCategories(subCategories);
+        setSelectedSubCategoryId(created.id);
+        setInsuranceItemMasters([]);
+        setSelectedItemId("");
+        setDisplayWorkName("");
+        setSelectedWorkItem(null);
+        setWorkItemQuery("");
+        setPrice("");
+      } else {
+        const categoryId = selectedCategoryId as number;
+        const subCategoryId = selectedSubCategoryId as number;
+        const items = await loadItemMasters(categoryId, subCategoryId);
+        setInsuranceItemMasters(items);
+        setSelectedItemId(created.id);
+
+        const selectedSubCategory = insuranceSubCategories.find(
+          (subCategory) => subCategory.id === selectedSubCategoryId
+        );
+        const nextName = `${selectedSubCategory?.name ?? ""} ${created.name}`.trim();
+        setDisplayWorkName(nextName);
+        setSelectedWorkItem({
+          id: created.id,
+          item_name: nextName,
+          type: workItemType,
+        });
+        setWorkItemQuery(nextName);
+      }
+
+      setAddMasterLevel(null);
+      setAddMasterName("");
+    } catch (error) {
+      console.error(error);
+      setAddMasterError(error instanceof Error ? error.message : "項目の追加に失敗しました");
+    } finally {
+      setIsAddingMaster(false);
+    }
+  };
+
   const resetOrderForm = () => {
     setCustomerId(customers[0]?.id ?? null);
     setPatients([]);
@@ -897,6 +1087,10 @@ function OrderEntryModal() {
     setPdfName("");
     setPdfPreviewUrl("");
     setIsDragActive(false);
+    setAddMasterLevel(null);
+    setAddMasterName("");
+    setAddMasterError("");
+    setIsAddingMaster(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -1090,6 +1284,12 @@ function OrderEntryModal() {
 
   const teethRight = toothType === "permanent" ? permanentRight : deciduousRight;
   const teethLeft = toothType === "permanent" ? permanentLeft : deciduousLeft;
+  const addMasterTitle =
+    addMasterLevel === "category"
+      ? "大分類を追加"
+      : addMasterLevel === "sub_category"
+        ? "中分類を追加"
+        : "小分類を追加";
 
   return (
     <section
@@ -1155,6 +1355,56 @@ function OrderEntryModal() {
             >
               OK
             </button>
+          </div>
+        </div>
+      ) : null}
+
+      {addMasterLevel !== null ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-[1px]">
+          <div className="w-full max-w-sm rounded-[18px] border border-[#E9E9E9] bg-white px-6 py-6 shadow-[0_18px_48px_rgba(0,0,0,0.14)]">
+            <h3 className="text-lg font-bold text-[#1F1F1F]">{addMasterTitle}</h3>
+            <input
+              value={addMasterName}
+              onChange={(event) => {
+                setAddMasterName(event.target.value);
+                setAddMasterError("");
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                }
+              }}
+              placeholder="名称を入力"
+              className="mt-4 h-10 w-full rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132]"
+              autoFocus
+            />
+
+            {addMasterError ? (
+              <p className="mt-3 rounded-lg border border-[#F4C7C7] bg-[#FFF3F3] px-3 py-2 text-sm text-[#A63C3C]">
+                {addMasterError}
+              </p>
+            ) : null}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeAddMasterDialog}
+                disabled={isAddingMaster}
+                className="rounded-lg border border-[#E1E1E1] bg-white px-4 py-2 text-sm font-semibold text-[#444444] transition-colors duration-200 ease-[ease] hover:bg-[#F8F8F8] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void submitAddMaster();
+                }}
+                disabled={isAddingMaster}
+                className="rounded-lg bg-[#fff362] px-5 py-2 text-sm font-bold text-[#222222] transition-colors duration-200 ease-[ease] hover:bg-[#f4e64f] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isAddingMaster ? "追加中..." : "追加"}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -1283,6 +1533,11 @@ function OrderEntryModal() {
                     <select
                       value={selectedCategoryId}
                       onChange={(event) => {
+                        if (event.target.value === "__add_category") {
+                          openAddMasterDialog("category");
+                          return;
+                        }
+
                         const nextCategoryId = event.target.value === "" ? "" : Number(event.target.value);
                         setSelectedCategoryId(nextCategoryId);
                         setSelectedSubCategoryId("");
@@ -1291,7 +1546,7 @@ function OrderEntryModal() {
                         setSelectedWorkItem(null);
                         setWorkItemQuery("");
                       }}
-                      disabled={customerId === null || insuranceCategories.length === 0}
+                      disabled={customerId === null}
                       className="h-10 w-[32%] min-w-0 shrink-0 rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132] disabled:bg-[#FAFAFA] disabled:text-[#999999]"
                     >
                       <option value="">大分類</option>
@@ -1300,11 +1555,17 @@ function OrderEntryModal() {
                           {category.name}
                         </option>
                       ))}
+                      <option value="__add_category">＋ 大分類を追加</option>
                     </select>
 
                     <select
                       value={selectedSubCategoryId}
                       onChange={(event) => {
+                        if (event.target.value === "__add_sub_category") {
+                          openAddMasterDialog("sub_category");
+                          return;
+                        }
+
                         const nextSubCategoryId = event.target.value === "" ? "" : Number(event.target.value);
                         setSelectedSubCategoryId(nextSubCategoryId);
                         setSelectedItemId("");
@@ -1312,7 +1573,7 @@ function OrderEntryModal() {
                         setSelectedWorkItem(null);
                         setWorkItemQuery("");
                       }}
-                      disabled={selectedCategoryId === "" || insuranceSubCategories.length === 0}
+                      disabled={selectedCategoryId === ""}
                       className="h-10 w-[32%] min-w-0 shrink-0 rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132] disabled:bg-[#FAFAFA] disabled:text-[#999999]"
                     >
                       <option value="">中分類</option>
@@ -1321,11 +1582,19 @@ function OrderEntryModal() {
                           {subCategory.name}
                         </option>
                       ))}
+                      {selectedCategoryId !== "" ? (
+                        <option value="__add_sub_category">＋ 中分類を追加</option>
+                      ) : null}
                     </select>
 
                     <select
                       value={selectedItemId}
                       onChange={(event) => {
+                        if (event.target.value === "__add_item") {
+                          openAddMasterDialog("item");
+                          return;
+                        }
+
                         const nextItemId = event.target.value === "" ? "" : Number(event.target.value);
                         setSelectedItemId(nextItemId);
 
@@ -1354,7 +1623,7 @@ function OrderEntryModal() {
 	                        });
                         setWorkItemQuery(nextName);
                       }}
-                      disabled={selectedSubCategoryId === "" || insuranceItemMasters.length === 0}
+                      disabled={selectedSubCategoryId === ""}
                       className="h-10 w-[32%] min-w-0 shrink-0 rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132] disabled:bg-[#FAFAFA] disabled:text-[#999999]"
                     >
                       <option value="">小分類</option>
@@ -1363,6 +1632,9 @@ function OrderEntryModal() {
                           {item.name}
                         </option>
                       ))}
+                      {selectedSubCategoryId !== "" ? (
+                        <option value="__add_item">＋ 小分類を追加</option>
+                      ) : null}
                     </select>
                   </div>
 

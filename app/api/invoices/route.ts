@@ -430,6 +430,7 @@ export async function POST(request: NextRequest) {
             billing_closing_month_end: true,
             billing_issue_day: true,
             billing_issue_month_end: true,
+            invoice_rounding_unit: true,
           },
         });
 
@@ -1153,8 +1154,17 @@ export async function POST(request: NextRequest) {
             Prisma.Decimal.ROUND_HALF_UP
           );
 
-        const totalAmount = subtotal
+        const rawTotalAmount = subtotal
           .add(taxAmount);
+
+        // 医院別の端数処理（invoice_rounding_unit）を最終金額にのみ適用
+        const totalAmount =
+          customer.invoice_rounding_unit > 0
+            ? rawTotalAmount
+                .div(customer.invoice_rounding_unit)
+                .floor()
+                .mul(customer.invoice_rounding_unit)
+            : rawTotalAmount;
 
         /*
          * --------------------------------------------------

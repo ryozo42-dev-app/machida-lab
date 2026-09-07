@@ -37,6 +37,7 @@ type Clinic = {
   billing_issue_day: number | null;
   billing_issue_month_end: boolean;
   show_material_on_delivery: boolean;
+  invoice_rounding_unit: number;
 };
 
 type ClinicModalProps = {
@@ -52,6 +53,7 @@ type ClinicModalProps = {
     billing_issue_day: number | null;
   billing_issue_month_end: boolean;
     show_material_on_delivery: boolean;
+    invoice_rounding_unit: number;
   }) => void;
 };
 
@@ -83,6 +85,7 @@ const [billingClosingMonthEnd, setBillingClosingMonthEnd] = useState(false);
 const [billingIssueDay, setBillingIssueDay] = useState("");
 const [billingIssueMonthEnd, setBillingIssueMonthEnd] = useState(false);
 const [showMaterialOnDelivery, setShowMaterialOnDelivery] = useState(false);
+const [invoiceRoundingUnit, setInvoiceRoundingUnit] = useState(0);
 const [depositMaterialType, setDepositMaterialType] =
   useState<DepositMaterialType>("para");
 const [depositQuantity, setDepositQuantity] = useState("");
@@ -232,6 +235,9 @@ const fetchAutoInvoiceLockStatus = useCallback(async () => {
     setShowMaterialOnDelivery(
       customer.show_material_on_delivery
     );
+    setInvoiceRoundingUnit(
+      customer.invoice_rounding_unit ?? 0
+    );
   } else {
     setName("");
     setCode("");
@@ -241,6 +247,7 @@ const fetchAutoInvoiceLockStatus = useCallback(async () => {
     setBillingIssueDay("");
     setBillingIssueMonthEnd(false);
     setShowMaterialOnDelivery(false);
+    setInvoiceRoundingUnit(0);
   }
   setDepositMaterialType("para");
   setDepositHistoryMaterialType("para");
@@ -294,6 +301,7 @@ const fetchAutoInvoiceLockStatus = useCallback(async () => {
         : null,
     billing_issue_month_end: billingIssueMonthEnd,
     show_material_on_delivery: showMaterialOnDelivery,
+    invoice_rounding_unit: invoiceRoundingUnit,
   });
 };
 
@@ -556,6 +564,25 @@ const fetchAutoInvoiceLockStatus = useCallback(async () => {
                   </label>
 
                 </div>
+
+              <div className="mt-4">
+                <span className="text-sm text-[#555555]">
+                  請求金額の端数処理
+                </span>
+
+                <select
+                  value={invoiceRoundingUnit}
+                  disabled={isAutoInvoiceLocked}
+                  onChange={(event) =>
+                    setInvoiceRoundingUnit(Number(event.target.value))
+                  }
+                  className="mt-2 w-full rounded-lg border border-[#DCDCDC] bg-white px-3 py-2.5 text-sm text-[#222222] outline-none transition-colors focus:border-[#fff362] disabled:bg-[#F5F5F5] disabled:text-[#999999]"
+                >
+                  <option value={0}>なし</option>
+                  <option value={10}>10円未満切り捨て</option>
+                  <option value={100}>100円未満切り捨て</option>
+                </select>
+              </div>
             </div>
 
             <div className="border-t border-[#ECECEC] pt-5">

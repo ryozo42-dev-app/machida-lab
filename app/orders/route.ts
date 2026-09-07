@@ -446,9 +446,17 @@ export async function POST(req: NextRequest) {
     if (hasInsuranceItem) {
       const [insuranceItem] =
         await prisma.$queryRaw<Array<{ id: number }>>`
-          SELECT id
-          FROM insurance_item_masters
-          WHERE id = ${insuranceItemId}
+          SELECT iim.id
+          FROM insurance_item_masters iim
+          INNER JOIN insurance_sub_categories isc
+            ON isc.id = iim.sub_category_id
+          INNER JOIN insurance_categories ic
+            ON ic.id = isc.category_id
+          WHERE
+            iim.id = ${insuranceItemId}
+            AND iim.is_active = true
+            AND isc.is_active = true
+            AND ic.is_active = true
           LIMIT 1
         `;
 
@@ -499,18 +507,21 @@ export async function POST(req: NextRequest) {
      * 新自費項目存在確認
      */
     if (hasPrivateItemMaster) {
-      const privateItemMaster =
-        await prisma.private_item_masters.findUnique(
-          {
-            where: {
-              id: privateItemMasterId!,
-            },
-
-            select: {
-              id: true,
-            },
-          }
-        );
+      const [privateItemMaster] =
+        await prisma.$queryRaw<Array<{ id: number }>>`
+          SELECT pim.id
+          FROM private_item_masters pim
+          INNER JOIN private_sub_categories psc
+            ON psc.id = pim.sub_category_id
+          INNER JOIN private_categories pc
+            ON pc.id = psc.category_id
+          WHERE
+            pim.id = ${privateItemMasterId}
+            AND pim.is_active = true
+            AND psc.is_active = true
+            AND pc.is_active = true
+          LIMIT 1
+        `;
 
       if (!privateItemMaster) {
         return NextResponse.json(

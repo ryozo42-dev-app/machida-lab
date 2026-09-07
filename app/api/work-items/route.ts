@@ -179,15 +179,18 @@ export async function GET(request: Request) {
         const subCategories =
           await prisma.$queryRaw<SubCategoryRow[]>`
             SELECT
-              id,
-              category_id,
-              name,
-              sort_order
-            FROM insurance_sub_categories
+              isc.id,
+              isc.category_id,
+              isc.name,
+              isc.sort_order
+            FROM insurance_sub_categories isc
+            INNER JOIN insurance_categories ic
+              ON ic.id = isc.category_id
             WHERE
-              category_id = ${categoryId}
-              AND is_active = true
-            ORDER BY sort_order ASC, id ASC
+              isc.category_id = ${categoryId}
+              AND isc.is_active = true
+              AND ic.is_active = true
+            ORDER BY isc.sort_order ASC, isc.id ASC
           `;
 
         return NextResponse.json(
@@ -230,16 +233,22 @@ export async function GET(request: Request) {
 
       const itemMasters =
         await prisma.$queryRaw<ItemMasterRow[]>`
-          SELECT
-            id,
-            sub_category_id,
-            name,
-            sort_order
-          FROM insurance_item_masters
+            SELECT
+              iim.id,
+              iim.sub_category_id,
+              iim.name,
+              iim.sort_order
+          FROM insurance_item_masters iim
+          INNER JOIN insurance_sub_categories isc
+            ON isc.id = iim.sub_category_id
+          INNER JOIN insurance_categories ic
+            ON ic.id = isc.category_id
           WHERE
-            sub_category_id = ${subCategoryId}
-            AND is_active = true
-          ORDER BY sort_order ASC, id ASC
+            iim.sub_category_id = ${subCategoryId}
+            AND iim.is_active = true
+            AND isc.is_active = true
+            AND ic.is_active = true
+          ORDER BY iim.sort_order ASC, iim.id ASC
         `;
 
       return NextResponse.json(
@@ -318,15 +327,18 @@ export async function GET(request: Request) {
         const subCategories =
           await prisma.$queryRaw<SubCategoryRow[]>`
             SELECT
-              id,
-              category_id,
-              name,
-              sort_order
-            FROM private_sub_categories
+              psc.id,
+              psc.category_id,
+              psc.name,
+              psc.sort_order
+            FROM private_sub_categories psc
+            INNER JOIN private_categories pc
+              ON pc.id = psc.category_id
             WHERE
-              category_id = ${categoryId}
-              AND is_active = true
-            ORDER BY sort_order ASC, id ASC
+              psc.category_id = ${categoryId}
+              AND psc.is_active = true
+              AND pc.is_active = true
+            ORDER BY psc.sort_order ASC, psc.id ASC
           `;
 
         return NextResponse.json(
@@ -352,16 +364,22 @@ export async function GET(request: Request) {
 
       const itemMasters =
         await prisma.$queryRaw<ItemMasterRow[]>`
-          SELECT
-            id,
-            sub_category_id,
-            name,
-            sort_order
-          FROM private_item_masters
+            SELECT
+              pim.id,
+              pim.sub_category_id,
+              pim.name,
+              pim.sort_order
+          FROM private_item_masters pim
+          INNER JOIN private_sub_categories psc
+            ON psc.id = pim.sub_category_id
+          INNER JOIN private_categories pc
+            ON pc.id = psc.category_id
           WHERE
-            sub_category_id = ${subCategoryId}
-            AND is_active = true
-          ORDER BY sort_order ASC, id ASC
+            pim.sub_category_id = ${subCategoryId}
+            AND pim.is_active = true
+            AND psc.is_active = true
+            AND pc.is_active = true
+          ORDER BY pim.sort_order ASC, pim.id ASC
         `;
 
       return NextResponse.json(

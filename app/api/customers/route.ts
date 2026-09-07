@@ -17,6 +17,7 @@ export async function GET() {
         billing_issue_day: true,
         billing_issue_month_end: true,
         show_material_on_delivery: true,
+        invoice_rounding_unit: true,
       },
       orderBy: {
         name: "asc",
@@ -47,6 +48,19 @@ export async function POST(request: Request) {
     if (!code || !name) {
       return NextResponse.json(
         { error: "歯科医院コードと医院名を入力してください" },
+        { status: 400 }
+      );
+    }
+
+    const invoiceRoundingUnit =
+      body.invoice_rounding_unit === undefined ||
+      body.invoice_rounding_unit === null
+        ? 0
+        : Number(body.invoice_rounding_unit);
+
+    if (![0, 10, 100].includes(invoiceRoundingUnit)) {
+      return NextResponse.json(
+        { error: "請求金額の端数処理設定が正しくありません" },
         { status: 400 }
       );
     }
@@ -90,6 +104,7 @@ export async function POST(request: Request) {
         billing_issue_day: body.billing_issue_day ?? null,
         billing_issue_month_end: Boolean(body.billing_issue_month_end),
         show_material_on_delivery: Boolean(body.show_material_on_delivery),
+        invoice_rounding_unit: invoiceRoundingUnit,
       },
       select: {
         id: true,
@@ -100,6 +115,7 @@ export async function POST(request: Request) {
         billing_issue_day: true,
         billing_issue_month_end: true,
         show_material_on_delivery: true,
+        invoice_rounding_unit: true,
       },
     });
 

@@ -88,6 +88,15 @@ export async function PATCH(
       );
     }
 
+    const invoiceRoundingUnit = Number(body.invoice_rounding_unit);
+
+    if (![0, 10, 100].includes(invoiceRoundingUnit)) {
+      return NextResponse.json(
+        { error: "請求金額の端数処理設定が正しくありません" },
+        { status: 400 }
+      );
+    }
+
     const existing = await prisma.customers.findUnique({
       where: { id },
       select: {
@@ -96,6 +105,7 @@ export async function PATCH(
         billing_closing_month_end: true,
         billing_issue_day: true,
         billing_issue_month_end: true,
+        invoice_rounding_unit: true,
       },
     });
 
@@ -111,7 +121,8 @@ export async function PATCH(
       existing.billing_closing_month_end !==
         billingClosingMonthEnd ||
       existing.billing_issue_day !== billingIssueDay ||
-      existing.billing_issue_month_end !== billingIssueMonthEnd;
+      existing.billing_issue_month_end !== billingIssueMonthEnd ||
+      existing.invoice_rounding_unit !== invoiceRoundingUnit;
 
     const updateResult = await prisma.$transaction(async (transaction) => {
       if (hasBillingSettingsChange) {
@@ -156,6 +167,7 @@ export async function PATCH(
           billing_issue_day: billingIssueDay,
           billing_issue_month_end: billingIssueMonthEnd,
           show_material_on_delivery: Boolean(body.show_material_on_delivery),
+          invoice_rounding_unit: invoiceRoundingUnit,
         },
         select: {
           id: true,
@@ -166,6 +178,7 @@ export async function PATCH(
           billing_issue_day: true,
           billing_issue_month_end: true,
           show_material_on_delivery: true,
+          invoice_rounding_unit: true,
         },
       });
 

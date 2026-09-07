@@ -62,6 +62,7 @@ export async function createAutoInvoiceForCustomer({
           select: {
             id: true,
             name: true,
+            invoice_rounding_unit: true,
           },
         });
 
@@ -363,7 +364,7 @@ export async function createAutoInvoiceForCustomer({
           invoiceItems,
           subtotal,
           taxAmount,
-          totalAmount,
+          totalAmount: rawTotalAmount,
           baseUpSupportAmount,
         } = buildAutoInvoiceSnapshot({
           customerId,
@@ -379,6 +380,15 @@ export async function createAutoInvoiceForCustomer({
           depositMaterials,
           materials,
         });
+
+        // 医院別の端数処理（invoice_rounding_unit）を最終金額にのみ適用
+        const totalAmount =
+          customer.invoice_rounding_unit > 0
+            ? rawTotalAmount
+                .div(customer.invoice_rounding_unit)
+                .floor()
+                .mul(customer.invoice_rounding_unit)
+            : rawTotalAmount;
 
         const nextInvoiceNo = await generateNextInvoiceNo(
           transaction,
