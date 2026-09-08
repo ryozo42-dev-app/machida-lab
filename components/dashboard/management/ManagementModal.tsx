@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import ClinicModal from "./ClinicModal";
 import DocumentManagementPanel from "./DocumentManagementPanel";
+import InvoiceSettingsPanel from "./InvoiceSettingsPanel";
 import PatientHistoryPanel from "./PatientHistoryPanel";
 import UserManagementPanel from "./UserManagementPanel";
 import WorkMasterManagementPanel from "./WorkMasterManagementPanel";
@@ -54,6 +55,11 @@ const managementMenus: ManagementMenu[] = [
     id: "patientHistory",
     title: "患者作業履歴",
     description: "患者の過去2年間の作業履歴を検索・表示",
+  },
+  {
+    id: "invoiceSettings",
+    title: "請求設定",
+    description: "消費税率・ベースアップ支援金の管理",
   },
 ];
 
@@ -331,6 +337,10 @@ export default function ManagementModal() {
 
   if (activeMenu === "patientHistory") {
     return <PatientHistoryPanel onBack={() => setActiveMenu(null)} />;
+  }
+
+  if (activeMenu === "invoiceSettings") {
+    return <InvoiceSettingsPanel onBack={() => setActiveMenu(null)} />;
   }
 
   return (

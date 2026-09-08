@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getInvoiceEffectiveBoundaryDates, getApplicableTaxRate, getApplicableBaseUpSupportRate } from "@/lib/invoice-effective-settings";
+import { splitInvoicePeriodByEffectiveDates } from "@/lib/invoice-period-segments";
 
 class InvoiceCandidateRequestError extends Error {
   constructor(
@@ -265,6 +267,57 @@ export async function GET(request: NextRequest) {
       })),
     }));
 
+    /*
+     * 通常請求期間を、期間内に存在するBUS/税率のeffective_fromで
+     * segment化する（請求書作成処理そのものは変更しない）。
+     */
+    const boundaryDates = await getInvoiceEffectiveBoundaryDates(
+      prisma,
+      periodStart,
+      periodEnd
+    );
+
+    const periodSegments = splitInvoicePeriodByEffectiveDates(
+      periodStart,
+      periodEnd,
+      boundaryDates
+    );
+
+    const segments = await Promise.all(
+      periodSegments.map(async (segment) => {
+        const deliveryIds = deliveries
+          .filter(
+            (delivery) =>
+              delivery.delivery_date.getTime() >=
+                segment.periodStart.getTime() &&
+              delivery.delivery_date.getTime() <=
+                segment.periodEnd.getTime()
+          )
+          .map((delivery) => delivery.id);
+
+        const [applicableTaxRate, applicableBaseUpSupportRate] =
+          await Promise.all([
+            getApplicableTaxRate(prisma, segment.periodStart),
+            getApplicableBaseUpSupportRate(prisma, segment.periodStart),
+          ]);
+
+        return {
+          period: {
+            start: formatDate(segment.periodStart),
+            end: formatDate(segment.periodEnd),
+          },
+          count: deliveryIds.length,
+          delivery_ids: deliveryIds,
+          tax_rate: applicableTaxRate
+            ? Number(applicableTaxRate.tax_rate)
+            : null,
+          base_up_support_amount_per_item: applicableBaseUpSupportRate
+            ? applicableBaseUpSupportRate.amount
+            : null,
+        };
+      })
+    );
+
     return NextResponse.json({
       customer: {
         id: customer.id,
@@ -279,6 +332,8 @@ export async function GET(request: NextRequest) {
       count: result.length,
 
       deliveries: result,
+
+      segments,
     });
   } catch (error) {
     if (error instanceof InvoiceCandidateRequestError) {

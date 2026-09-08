@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { requireAuthResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getInvoiceEffectiveBoundaryDates, getApplicableBaseUpSupportRate } from "@/lib/invoice-effective-settings";
+import { splitInvoicePeriodByEffectiveDates } from "@/lib/invoice-period-segments";
 
-const BASE_UP_SUPPORT_AMOUNT_PER_ITEM = 136;
 type BaseUpSupportTaxMode =
   | "included_in_taxable_subtotal"
   | "outside_taxable_subtotal";
@@ -459,6 +460,28 @@ export async function POST(request: NextRequest) {
 
         /*
          * --------------------------------------------------
+         * 請求期間segment分割
+         *
+         * 通常請求期間内にBUS/税率のeffective_fromが
+         * 存在する場合、その日を境界に複数期間へ分割する。
+         * --------------------------------------------------
+         */
+        const boundaryDates =
+          await getInvoiceEffectiveBoundaryDates(
+            transaction,
+            periodStart,
+            periodEnd
+          );
+
+        const periodSegments =
+          splitInvoicePeriodByEffectiveDates(
+            periodStart,
+            periodEnd,
+            boundaryDates
+          );
+
+        /*
+         * --------------------------------------------------
          * すでに請求書へ使用された delivery_id
          * --------------------------------------------------
          */
@@ -525,32 +548,10 @@ export async function POST(request: NextRequest) {
         }
 
         /*
-         * --------------------------------------------------
-         * 税率確認
-         *
-         * 現時点では1請求書につき1税率。
-         * --------------------------------------------------
+         * 税率確認・BUS計算はsegment単位で行うため、
+         * ここでは全期間分のdelivery_item/order_item等の
+         * 共通データ取得のみ行う。
          */
-        const taxRateStrings = [
-          ...new Set(
-            deliveries.flatMap((delivery) =>
-              delivery.tax_rate === null
-                ? []
-                : [delivery.tax_rate.toString()]
-            )
-          ),
-        ];
-
-        if (taxRateStrings.length !== 1) {
-          throw new InvoiceRequestError(
-            "請求対象に異なる税率の納品書が含まれています",
-            409
-          );
-        }
-
-        const taxRate = new Prisma.Decimal(
-          taxRateStrings[0]
-        );
 
         /*
          * --------------------------------------------------
@@ -1095,255 +1096,364 @@ export async function POST(request: NextRequest) {
         );
 
         /*
-         * ベースアップ支援金
+         * --------------------------------------------------
+         * 正式な請求期間の分割範囲を確定する
          *
-         * 136円 × 対象数量を、通常明細と同じ請求明細行として扱う。
+         * periodSegmentsはeffective_from境界による内部分割に
+         * すぎず、納品が0件のsegmentが存在するというだけの理由で
+         * 請求書のperiod_start/period_endを縮めてはならない。
+         *
+         * ここでは「納品が実際に存在するsegment」だけを最終的な
+         * 請求書単位とし、その前後にある空segmentの範囲を
+         * 隣接する非空segmentへ吸収させることで、
+         * 発行される請求書群のperiod_start〜period_endが
+         * 元の正式な請求期間(periodStart〜periodEnd)を
+         * 隙間なくカバーするようにする。
+         * --------------------------------------------------
          */
-        const baseUpSupportQuantity =
-          orderItems.reduce((total, orderItem) => {
-            if (!orderItem.base_up_support_target) {
-              return total;
-            }
+        const effectiveSegments: Array<{
+          periodStart: Date;
+          periodEnd: Date;
+        }> = [];
 
-            return total + (orderItem.quantity ?? 1);
-          }, 0);
+        let pendingSegmentStart: Date | null = null;
 
-        const baseUpSupportAmount = new Prisma.Decimal(
-          BASE_UP_SUPPORT_AMOUNT_PER_ITEM
-        ).mul(baseUpSupportQuantity);
+        for (const segment of periodSegments) {
+          if (pendingSegmentStart === null) {
+            pendingSegmentStart = segment.periodStart;
+          }
 
-        if (baseUpSupportQuantity > 0) {
-          const lastDelivery =
-            deliveries[deliveries.length - 1];
+          const segmentHasDeliveries = deliveries.some(
+            (delivery) =>
+              delivery.delivery_date.getTime() >=
+                segment.periodStart.getTime() &&
+              delivery.delivery_date.getTime() <=
+                segment.periodEnd.getTime()
+          );
 
-          invoiceItemRows.push({
-            delivery_id: lastDelivery.id,
-            order_item_id: null,
-            delivery_date: lastDelivery.delivery_date,
-            patient_name: "",
-            work_name: "BUS",
-            tooth_display: null,
-            tooth_snapshot: null,
-            material_usage_text: null,
-            quantity: baseUpSupportQuantity,
-            unit_price: new Prisma.Decimal(
-              BASE_UP_SUPPORT_AMOUNT_PER_ITEM
-            ),
-            amount: baseUpSupportAmount,
-            sort_order: invoiceItemRows.length,
-          });
+          if (segmentHasDeliveries) {
+            effectiveSegments.push({
+              periodStart: pendingSegmentStart,
+              periodEnd: segment.periodEnd,
+            });
+
+            pendingSegmentStart = null;
+          }
+        }
+
+        if (
+          pendingSegmentStart !== null &&
+          effectiveSegments.length > 0
+        ) {
+          // 末尾の空segmentは、直前の実請求書のperiod_endへ吸収する
+          effectiveSegments[effectiveSegments.length - 1].periodEnd =
+            periodEnd;
         }
 
         /*
          * --------------------------------------------------
-         * 金額集計
+         * segmentごとにinvoiceを作成
+         *
+         * 通常明細(invoiceItemRows)・orderItems・deliveriesは
+         * 全期間分を1回だけ取得済みのものを、ここでsegmentごとに
+         * 絞り込んで利用する（segment単位でのDB再取得はしない）。
          * --------------------------------------------------
          */
-        const subtotal =
-          invoiceItemRows.reduce(
-            (total, item) =>
-              total.add(item.amount),
+        const results: Array<{
+          id: number;
+          invoice_no: string | null;
+          display_invoice_no: string | null;
+          customer_id: number;
+          customer_name: string;
+          period_start: Date | null;
+          period_end: Date | null;
+          invoice_date: Date | null;
+          subtotal: Prisma.Decimal | null;
+          tax_rate: Prisma.Decimal | null;
+          tax_amount: Prisma.Decimal | null;
+          base_up_support_amount: Prisma.Decimal;
+          total_amount: Prisma.Decimal | null;
+          delivery_count: number;
+          item_count: number;
+        }> = [];
+
+        for (const segment of effectiveSegments) {
+          const segmentDeliveries = deliveries.filter(
+            (delivery) =>
+              delivery.delivery_date.getTime() >=
+                segment.periodStart.getTime() &&
+              delivery.delivery_date.getTime() <=
+                segment.periodEnd.getTime()
+          );
+
+          if (segmentDeliveries.length === 0) {
+            continue;
+          }
+
+          const segmentDeliveryIds = new Set(
+            segmentDeliveries.map((delivery) => delivery.id)
+          );
+
+          /*
+           * segment内の税率確認（1segment=1税率）
+           */
+          const segmentTaxRateStrings = [
+            ...new Set(
+              segmentDeliveries.flatMap((delivery) =>
+                delivery.tax_rate === null
+                  ? []
+                  : [delivery.tax_rate.toString()]
+              )
+            ),
+          ];
+
+          if (segmentTaxRateStrings.length !== 1) {
+            throw new InvoiceRequestError(
+              "請求対象に異なる税率の納品書が含まれています",
+              409
+            );
+          }
+
+          const segmentTaxRate = new Prisma.Decimal(
+            segmentTaxRateStrings[0]
+          );
+
+          /*
+           * segment内の通常明細
+           */
+          const segmentInvoiceItemRows = invoiceItemRows
+            .filter((item) =>
+              segmentDeliveryIds.has(item.delivery_id)
+            )
+            .map((item, index) => ({
+              ...item,
+              sort_order: index,
+            }));
+
+          /*
+           * segment内のBUS対象数量
+           */
+          const segmentOrderItemIds = new Set(
+            deliveryItems
+              .filter((item) =>
+                segmentDeliveryIds.has(item.delivery_id)
+              )
+              .map((item) => item.order_item_id)
+          );
+
+          const segmentBaseUpSupportQuantity =
+            orderItems.reduce((total, orderItem) => {
+              if (
+                !orderItem.base_up_support_target ||
+                !segmentOrderItemIds.has(orderItem.id)
+              ) {
+                return total;
+              }
+
+              return total + (orderItem.quantity ?? 1);
+            }, 0);
+
+          let segmentBaseUpSupportAmount = new Prisma.Decimal(0);
+
+          if (segmentBaseUpSupportQuantity > 0) {
+            const applicableBusRate =
+              await getApplicableBaseUpSupportRate(
+                transaction,
+                segment.periodStart
+              );
+
+            if (!applicableBusRate) {
+              throw new InvoiceRequestError(
+                "請求期間に適用可能なBUS設定がありません",
+                409
+              );
+            }
+
+            segmentBaseUpSupportAmount = new Prisma.Decimal(
+              applicableBusRate.amount
+            ).mul(segmentBaseUpSupportQuantity);
+
+            const lastDelivery =
+              segmentDeliveries[segmentDeliveries.length - 1];
+
+            segmentInvoiceItemRows.push({
+              delivery_id: lastDelivery.id,
+              order_item_id: null,
+              delivery_date: lastDelivery.delivery_date,
+              patient_name: "",
+              work_name: "BUS",
+              tooth_display: null,
+              tooth_snapshot: null,
+              material_usage_text: null,
+              quantity: segmentBaseUpSupportQuantity,
+              unit_price: new Prisma.Decimal(
+                applicableBusRate.amount
+              ),
+              amount: segmentBaseUpSupportAmount,
+              sort_order: segmentInvoiceItemRows.length,
+            });
+          }
+
+          /*
+           * segment金額集計
+           */
+          const segmentSubtotal = segmentInvoiceItemRows.reduce(
+            (total, item) => total.add(item.amount),
             new Prisma.Decimal(0)
           );
 
-        const taxAmount = subtotal
-          .mul(taxRate)
-          .div(100)
-          .toDecimalPlaces(
-            0,
-            Prisma.Decimal.ROUND_HALF_UP
-          );
+          const segmentTaxAmount = segmentSubtotal
+            .mul(segmentTaxRate)
+            .div(100)
+            .toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP);
 
-        const rawTotalAmount = subtotal
-          .add(taxAmount);
+          const segmentRawTotalAmount =
+            segmentSubtotal.add(segmentTaxAmount);
 
-        // 医院別の端数処理（invoice_rounding_unit）を最終金額にのみ適用
-        const totalAmount =
-          customer.invoice_rounding_unit > 0
-            ? rawTotalAmount
-                .div(customer.invoice_rounding_unit)
-                .floor()
-                .mul(customer.invoice_rounding_unit)
-            : rawTotalAmount;
+          // 医院別の端数処理（invoice_rounding_unit）を最終金額にのみ適用
+          const segmentTotalAmount =
+            customer.invoice_rounding_unit > 0
+              ? segmentRawTotalAmount
+                  .div(customer.invoice_rounding_unit)
+                  .floor()
+                  .mul(customer.invoice_rounding_unit)
+              : segmentRawTotalAmount;
 
-        /*
-         * --------------------------------------------------
-         * 請求番号
-         * --------------------------------------------------
-         */
-        const existingInvoiceRows =
-          await transaction.invoices.findMany({
-            where: {
-              invoice_date: invoiceDate,
+          /*
+           * 請求番号
+           *
+           * 同一transaction内で直前に作成したinvoiceも
+           * 採番対象として認識できるよう、segmentごとに
+           * 都度再取得する。
+           */
+          const existingInvoiceRows =
+            await transaction.invoices.findMany({
+              where: {
+                invoice_date: invoiceDate,
 
-              invoice_no: {
-                startsWith: `INV-${formatDate(
-                  invoiceDate
-                )}-`,
+                invoice_no: {
+                  startsWith: `INV-${formatDate(
+                    invoiceDate
+                  )}-`,
+                },
               },
-            },
 
-            select: {
-              invoice_no: true,
-            },
-          });
+              select: {
+                invoice_no: true,
+              },
+            });
 
-        const nextInvoiceNo =
-          createNextInvoiceNo(
+          const nextInvoiceNo = createNextInvoiceNo(
             invoiceDate,
-            existingInvoiceRows.flatMap(
-              (row) =>
-                row.invoice_no
-                  ? [row.invoice_no]
-                  : []
+            existingInvoiceRows.flatMap((row) =>
+              row.invoice_no ? [row.invoice_no] : []
             )
           );
 
-        /*
-         * --------------------------------------------------
-         * invoices 作成
-         * --------------------------------------------------
-         */
-        const createdInvoice =
-          await transaction.invoices.create({
-            data: {
-              invoice_no: nextInvoiceNo,
+          /*
+           * invoices 作成
+           */
+          const createdInvoice =
+            await transaction.invoices.create({
+              data: {
+                invoice_no: nextInvoiceNo,
 
-              /*
-               * 表面表示用番号は今後別管理できるよう
-               * 現時点では内部番号と同じ値で開始。
-               */
-              display_invoice_no:
-                nextInvoiceNo,
+                /*
+                 * 表面表示用番号は今後別管理できるよう
+                 * 現時点では内部番号と同じ値で開始。
+                 */
+                display_invoice_no: nextInvoiceNo,
 
-              customer_id: customerId,
+                customer_id: customerId,
 
-              period_start: periodStart,
-              period_end: periodEnd,
+                period_start: segment.periodStart,
+                period_end: segment.periodEnd,
 
-              closing_date: periodEnd,
-              invoice_date: invoiceDate,
+                closing_date: segment.periodEnd,
+                invoice_date: invoiceDate,
 
-              subtotal,
+                subtotal: segmentSubtotal,
 
-              tax_rate: taxRate,
+                tax_rate: segmentTaxRate,
 
-              tax_amount: taxAmount,
+                tax_amount: segmentTaxAmount,
 
-              base_up_support_amount:
-                baseUpSupportAmount,
+                base_up_support_amount:
+                  segmentBaseUpSupportAmount,
 
-              total_amount: totalAmount,
+                total_amount: segmentTotalAmount,
 
-              paid: false,
-            },
-          });
+                paid: false,
+              },
+            });
 
-        /*
-         * --------------------------------------------------
-         * invoice_deliveries
-         * --------------------------------------------------
-         */
-        await transaction.invoice_deliveries.createMany(
-          {
-            data: deliveries.map((delivery) => ({
+          /*
+           * invoice_deliveries
+           */
+          await transaction.invoice_deliveries.createMany({
+            data: segmentDeliveries.map((delivery) => ({
               invoice_id: createdInvoice.id,
               delivery_id: delivery.id,
             })),
-          }
-        );
+          });
 
-        /*
-         * --------------------------------------------------
-         * invoice_items
-         * --------------------------------------------------
-         */
-        await transaction.invoice_items.createMany({
-          data: invoiceItemRows.map((item) => ({
-            invoice_id: createdInvoice.id,
+          /*
+           * invoice_items
+           */
+          await transaction.invoice_items.createMany({
+            data: segmentInvoiceItemRows.map((item) => ({
+              invoice_id: createdInvoice.id,
 
-            delivery_id: item.delivery_id,
+              delivery_id: item.delivery_id,
 
-            order_item_id:
-              item.order_item_id,
+              order_item_id: item.order_item_id,
 
-            delivery_date:
-              item.delivery_date,
+              delivery_date: item.delivery_date,
 
-            patient_name:
-              item.patient_name,
+              patient_name: item.patient_name,
 
-            work_name:
-              item.work_name,
+              work_name: item.work_name,
 
-            tooth_display:
-              item.tooth_display,
+              tooth_display: item.tooth_display,
 
-            tooth_snapshot:
-              item.tooth_snapshot ?? Prisma.JsonNull,
+              tooth_snapshot:
+                item.tooth_snapshot ?? Prisma.JsonNull,
 
-            material_usage_text:
-              item.material_usage_text,
+              material_usage_text:
+                item.material_usage_text,
 
-            quantity:
-              item.quantity,
+              quantity: item.quantity,
 
-            unit_price:
-              item.unit_price,
+              unit_price: item.unit_price,
 
-            amount:
-              item.amount,
+              amount: item.amount,
 
-            sort_order:
-              item.sort_order,
-          })),
-        });
+              sort_order: item.sort_order,
+            })),
+          });
 
-        return {
-          id: createdInvoice.id,
+          results.push({
+            id: createdInvoice.id,
+            invoice_no: createdInvoice.invoice_no,
+            display_invoice_no:
+              createdInvoice.display_invoice_no,
+            customer_id: createdInvoice.customer_id,
+            customer_name: customer.name,
+            period_start: createdInvoice.period_start,
+            period_end: createdInvoice.period_end,
+            invoice_date: createdInvoice.invoice_date,
+            subtotal: createdInvoice.subtotal,
+            tax_rate: createdInvoice.tax_rate,
+            tax_amount: createdInvoice.tax_amount,
+            base_up_support_amount:
+              createdInvoice.base_up_support_amount,
+            total_amount: createdInvoice.total_amount,
+            delivery_count: segmentDeliveries.length,
+            item_count: segmentInvoiceItemRows.length,
+          });
+        }
 
-          invoice_no:
-            createdInvoice.invoice_no,
-
-          display_invoice_no:
-            createdInvoice.display_invoice_no,
-
-          customer_id:
-            createdInvoice.customer_id,
-
-          customer_name:
-            customer.name,
-
-          period_start:
-            createdInvoice.period_start,
-
-          period_end:
-            createdInvoice.period_end,
-
-          invoice_date:
-            createdInvoice.invoice_date,
-
-          subtotal:
-            createdInvoice.subtotal,
-
-          tax_rate:
-            createdInvoice.tax_rate,
-
-          tax_amount:
-            createdInvoice.tax_amount,
-
-          base_up_support_amount:
-            createdInvoice.base_up_support_amount,
-
-          total_amount:
-            createdInvoice.total_amount,
-
-          delivery_count:
-            deliveries.length,
-
-          item_count:
-            invoiceItemRows.length,
-        };
+        return results;
       },
       {
         isolationLevel: "Serializable",
@@ -1351,7 +1461,9 @@ export async function POST(request: NextRequest) {
     );
 
     return NextResponse.json(
-      invoice,
+      {
+        invoices: invoice,
+      },
       {
         status: 201,
       }

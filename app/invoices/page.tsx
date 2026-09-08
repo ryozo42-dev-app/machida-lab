@@ -86,6 +86,12 @@ type CandidateResponse = {
 type CreatedInvoice = {
   id: number;
   display_invoice_no: string;
+  period_start: string;
+  period_end: string;
+};
+
+type IssueInvoiceResponse = {
+  invoices: CreatedInvoice[];
 };
 
 function getInitialBillingDate() {
@@ -185,8 +191,8 @@ export default function InvoicesPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [candidate, setCandidate] =
     useState<CandidateResponse | null>(null);
-  const [createdInvoice, setCreatedInvoice] =
-    useState<CreatedInvoice | null>(null);
+  const [createdInvoices, setCreatedInvoices] =
+    useState<CreatedInvoice[]>([]);
   const [isConfirmModalOpen, setIsConfirmModalOpen] =
     useState(false);
 
@@ -235,7 +241,7 @@ export default function InvoicesPage() {
 
   const resetResult = () => {
     setCandidate(null);
-    setCreatedInvoice(null);
+    setCreatedInvoices([]);
     setErrorMessage("");
     setIsConfirmModalOpen(false);
   };
@@ -249,7 +255,7 @@ export default function InvoicesPage() {
     setIsChecking(true);
     setErrorMessage("");
     setCandidate(null);
-    setCreatedInvoice(null);
+    setCreatedInvoices([]);
 
     try {
       const params = new URLSearchParams({
@@ -287,7 +293,7 @@ export default function InvoicesPage() {
 
     setIsIssuing(true);
     setErrorMessage("");
-    setCreatedInvoice(null);
+    setCreatedInvoices([]);
 
     try {
       const response = await fetch("/api/invoices", {
@@ -306,8 +312,8 @@ export default function InvoicesPage() {
         throw new Error(await readErrorMessage(response));
       }
 
-      const data = (await response.json()) as CreatedInvoice;
-      setCreatedInvoice(data);
+      const data = (await response.json()) as IssueInvoiceResponse;
+      setCreatedInvoices(data.invoices);
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -322,7 +328,7 @@ export default function InvoicesPage() {
   const canIssue =
     candidate !== null &&
     candidate.count > 0 &&
-    !createdInvoice &&
+    createdInvoices.length === 0 &&
     !isIssuing;
 
   const deliveryTotals = useMemo(() => {
@@ -716,52 +722,70 @@ export default function InvoicesPage() {
                     </div>
                   </>
                 )}
-
-                {createdInvoice ? (
-                  <div className="mt-5 rounded-[10px] border border-[#E6E6E6] bg-white p-4">
-                    <h3 className="text-base font-bold text-[#222222]">
-                      請求書を発行しました
-                    </h3>
-                    <div className="mt-3">
-                      <p className="text-xs font-semibold text-[#777777]">
-                        請求書番号
-                      </p>
-                      <p className="mt-1 text-base font-semibold text-[#222222]">
-                        {createdInvoice.display_invoice_no}
-                      </p>
-                    </div>
-                  </div>
-                ) : null}
               </div>
 
-              <footer className="flex shrink-0 justify-end gap-3 border-t border-[#E6E6E6] px-6 py-4">
-                <button
-                  type="button"
-                  onClick={closeConfirmModal}
-                  disabled={isIssuing}
-                  className="h-10 rounded-[8px] border border-[#E1E1E1] bg-white px-5 text-sm font-semibold text-[#444444] transition-colors hover:bg-[#F8F8F8] disabled:cursor-not-allowed disabled:text-[#BBBBBB]"
-                >
-                  キャンセル
-                </button>
-                {createdInvoice ? (
-                  <a
-                    href={`/invoices/${createdInvoice.id}/pdf`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex h-10 items-center rounded-[8px] bg-[#fff362] px-5 text-sm font-bold text-[#222222] transition-colors hover:bg-[#fff362]"
-                  >
-                    請求書PDFを表示
-                  </a>
-                ) : (
+              <footer className="flex shrink-0 flex-col gap-3 border-t border-[#E6E6E6] px-6 py-4">
+                {createdInvoices.length > 0 ? (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-sm font-bold text-[#222222]">
+                      請求書を発行しました
+                    </p>
+
+                    {createdInvoices.map((invoice) => (
+                      <div
+                        key={invoice.id}
+                        className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-[8px] border border-[#EFEFEF] px-3 py-2"
+                      >
+                        <span className="text-xs font-semibold text-[#777777]">
+                          請求期間：
+                          <span className="ml-1 text-sm font-semibold text-[#222222]">
+                            {formatDisplayDate(invoice.period_start)}
+                            ～{formatDisplayDate(invoice.period_end)}
+                          </span>
+                        </span>
+
+                        <span className="text-xs font-semibold text-[#777777]">
+                          請求書番号：
+                          <span className="ml-1 text-sm font-semibold text-[#222222]">
+                            {invoice.display_invoice_no}
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+
+                    <a
+                      href={`/invoices/group/pdf?ids=${createdInvoices
+                        .map((invoice) => invoice.id)
+                        .join(",")}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex h-9 w-fit items-center rounded-[8px] bg-[#fff362] px-4 text-sm font-bold text-[#222222] transition-colors hover:bg-[#fff362]"
+                    >
+                      請求書PDFを表示
+                    </a>
+                  </div>
+                ) : null}
+
+                <div className="flex justify-end gap-3">
                   <button
                     type="button"
-                    onClick={handleIssue}
-                    disabled={!canIssue}
-                    className="h-10 rounded-[8px] bg-[#fff362] px-5 text-sm font-bold text-[#222222] transition-colors hover:bg-[#fff362] disabled:cursor-not-allowed disabled:bg-[#BDBDBD]"
+                    onClick={closeConfirmModal}
+                    disabled={isIssuing}
+                    className="h-10 rounded-[8px] border border-[#E1E1E1] bg-white px-5 text-sm font-semibold text-[#444444] transition-colors hover:bg-[#F8F8F8] disabled:cursor-not-allowed disabled:text-[#BBBBBB]"
                   >
-                    {isIssuing ? "発行中..." : "請求書を発行"}
+                    キャンセル
                   </button>
-                )}
+                  {createdInvoices.length > 0 ? null : (
+                    <button
+                      type="button"
+                      onClick={handleIssue}
+                      disabled={!canIssue}
+                      className="h-10 rounded-[8px] bg-[#fff362] px-5 text-sm font-bold text-[#222222] transition-colors hover:bg-[#fff362] disabled:cursor-not-allowed disabled:bg-[#BDBDBD]"
+                    >
+                      {isIssuing ? "発行中..." : "請求書を発行"}
+                    </button>
+                  )}
+                </div>
               </footer>
             </section>
           </div>
