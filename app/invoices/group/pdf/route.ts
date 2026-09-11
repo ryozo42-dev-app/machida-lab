@@ -496,9 +496,9 @@ function renderDetailTableHtml(items: GroupInvoiceItem[]) {
   return `
     <table class="detail-table">
       <colgroup>
-        <col style="width: 15%;" />
-        <col style="width: 31.5%;" />
-        <col style="width: 20%;" />
+        <col style="width: 14%;" />
+        <col style="width: 24.5%;" />
+        <col style="width: 28%;" />
         <col style="width: 9%;" />
         <col style="width: 5%;" />
         <col style="width: 9.75%;" />

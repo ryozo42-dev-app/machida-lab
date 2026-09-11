@@ -1319,9 +1319,9 @@ function createDeliveryHtml(
        *
        * 列幅は colgroup で固定
        *
-       * 患者名    15%
-       * 作業内容 31.5%
-       * 部位      20%
+       * 患者名    14%
+       * 作業内容 24.5%
+       * 部位      28%
        * 使用材料   9%
        * 数量       5%
        * 単価     9.75%
@@ -1636,12 +1636,12 @@ function createDeliveryHtml(
 
         <!--
           列幅をここで完全固定
-          15% + 31.5% + 20% + 9% + 5% + 9.75% + 9.75% = 100%
+          14% + 24.5% + 28% + 9% + 5% + 9.75% + 9.75% = 100%
         -->
         <colgroup>
-          <col style="width: 15%;" />
-          <col style="width: 31.5%;" />
-          <col style="width: 20%;" />
+          <col style="width: 14%;" />
+          <col style="width: 24.5%;" />
+          <col style="width: 28%;" />
           <col style="width: 9%;" />
           <col style="width: 5%;" />
           <col style="width: 9.75%;" />
