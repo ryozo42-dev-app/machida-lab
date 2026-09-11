@@ -166,19 +166,23 @@ function createEmptyToothChart(): ToothChart {
   };
 }
 
-function sortToothValues(values: ToothChartValue[]) {
+function sortToothValues(
+  values: ToothChartValue[],
+  direction: "asc" | "desc" = "asc"
+) {
   return [...values].sort((first, second) => {
     const firstNumber = Number(first.value);
     const secondNumber = Number(second.value);
+    const directionMultiplier = direction === "asc" ? 1 : -1;
 
     if (
       Number.isFinite(firstNumber) &&
       Number.isFinite(secondNumber)
     ) {
-      return firstNumber - secondNumber;
+      return (firstNumber - secondNumber) * directionMultiplier;
     }
 
-    return first.value.localeCompare(second.value, "ja");
+    return first.value.localeCompare(second.value, "ja") * directionMultiplier;
   });
 }
 
@@ -229,7 +233,10 @@ function createToothChart(teeth: InvoicePdfTooth[]) {
   return chart;
 }
 
-function expandBridgeValues(values: ToothChartValue[]) {
+function expandBridgeValues(
+  values: ToothChartValue[],
+  direction: "asc" | "desc" = "asc"
+) {
   const bridgeNumbers = values
     .filter((tooth) => tooth.isBridge)
     .map((tooth) => Number(tooth.value))
@@ -241,6 +248,7 @@ function expandBridgeValues(values: ToothChartValue[]) {
 
   const bridgeStart = Math.min(...bridgeNumbers);
   const bridgeEnd = Math.max(...bridgeNumbers);
+  const bridgeNumberSet = new Set(bridgeNumbers);
   const expanded = new Map<number, ToothChartValue>();
 
   for (const tooth of values) {
@@ -249,7 +257,7 @@ function expandBridgeValues(values: ToothChartValue[]) {
     if (Number.isInteger(toothNumber)) {
       expanded.set(toothNumber, {
         value: tooth.value,
-        isBridge: false,
+        isBridge: tooth.isBridge,
       });
     }
   }
@@ -261,38 +269,39 @@ function expandBridgeValues(values: ToothChartValue[]) {
   ) {
     expanded.set(toothNumber, {
       value: String(toothNumber),
-      isBridge:
-        toothNumber === bridgeStart || toothNumber === bridgeEnd,
+      isBridge: bridgeNumberSet.has(toothNumber),
     });
   }
 
-  return sortToothValues([...expanded.values()]);
+  return sortToothValues([...expanded.values()], direction);
 }
 
-function renderToothSide(values: ToothChartValue[]) {
-  const displayValues = expandBridgeValues(values);
-
-  const bridgeIndexes = displayValues.flatMap((tooth, index) =>
-    tooth.isBridge ? [index] : []
-  );
-
-  const bridgeStart = bridgeIndexes[0] ?? -1;
-  const bridgeEnd = bridgeIndexes.at(-1) ?? -1;
+function renderToothSide(
+  values: ToothChartValue[],
+  direction: "asc" | "desc" = "asc"
+) {
+  const displayValues = expandBridgeValues(values, direction);
 
   return displayValues
-    .map((tooth, index) => {
+    .map((tooth) => {
       const escapedValue = escapeHtml(tooth.value);
 
-      if (
-        tooth.isBridge &&
-        (index === bridgeStart || index === bridgeEnd)
-      ) {
+      if (tooth.isBridge) {
         return `<span class="tooth-bridge-end">${escapedValue}</span>`;
       }
 
       return `<span class="tooth-number">${escapedValue}</span>`;
     })
     .join(" ");
+}
+
+function hasBridgeRange(values: ToothChartValue[]) {
+  return (
+    values
+      .filter((tooth) => tooth.isBridge)
+      .map((tooth) => Number(tooth.value))
+      .filter((value) => Number.isInteger(value)).length >= 2
+  );
 }
 
 function renderToothNumbersHtml(teeth: InvoicePdfTooth[]) {
@@ -324,31 +333,67 @@ function renderToothNumbersHtml(teeth: InvoicePdfTooth[]) {
           .map(escapeHtml)
           .join(", ")}</div>`
       : "";
+  const upperRightBridgeOnly =
+    hasBridgeRange(chart.upperRight) &&
+    chart.upperLeft.length === 0;
+  const upperLeftBridgeOnly =
+    hasBridgeRange(chart.upperLeft) &&
+    chart.upperRight.length === 0;
+  const upperRowStyle = upperRightBridgeOnly
+    ? ` style="grid-template-columns: max-content 1px 0; justify-content: end;"`
+    : upperLeftBridgeOnly
+      ? ` style="grid-template-columns: 0 1px max-content; justify-content: start;"`
+    : "";
+  const upperRightSideStyle = upperRightBridgeOnly
+    ? ` style="padding-right: 0;"`
+    : "";
+  const upperLeftSideStyle = upperLeftBridgeOnly
+    ? ` style="padding-left: 0;"`
+    : "";
+  const lowerRightBridgeOnly =
+    hasBridgeRange(chart.lowerRight) &&
+    chart.lowerLeft.length === 0;
+  const lowerLeftBridgeOnly =
+    hasBridgeRange(chart.lowerLeft) &&
+    chart.lowerRight.length === 0;
+  const lowerRowStyle = lowerRightBridgeOnly
+    ? ` style="grid-template-columns: max-content 1px 0; justify-content: end;"`
+    : lowerLeftBridgeOnly
+      ? ` style="grid-template-columns: 0 1px max-content; justify-content: start;"`
+    : "";
+  const lowerRightSideStyle = lowerRightBridgeOnly
+    ? ` style="padding-right: 0;"`
+    : "";
+  const lowerLeftSideStyle = lowerLeftBridgeOnly
+    ? ` style="padding-left: 0;"`
+    : "";
 
   return `
     <div class="tooth-chart" aria-label="歯式">
-      <div class="tooth-row tooth-row-upper">
-        <div class="tooth-side tooth-side-right">${renderToothSide(
-          chart.upperRight
+      <div class="tooth-row tooth-row-upper"${upperRowStyle}>
+        <div class="tooth-side tooth-side-right"${upperRightSideStyle}>${renderToothSide(
+          chart.upperRight,
+          "desc"
         )}</div>
         <div class="tooth-axis tooth-axis-upper${
           hasUpper ? " is-visible" : ""
         }"></div>
-        <div class="tooth-side tooth-side-left">${renderToothSide(
+        <div class="tooth-side tooth-side-left"${upperLeftSideStyle}>${renderToothSide(
           chart.upperLeft
         )}</div>
       </div>
 
       <div class="tooth-boundary"></div>
 
-      <div class="tooth-row tooth-row-lower">
-        <div class="tooth-side tooth-side-right">${renderToothSide(
-          chart.lowerRight
+      <div class="tooth-row tooth-row-lower"${lowerRowStyle}>
+        <div class="tooth-side tooth-side-right"${lowerRightSideStyle}>${renderToothSide(
+          chart.lowerRight,
+          "desc"
         )}</div>
         <div class="tooth-axis tooth-axis-lower${
           hasLower ? " is-visible" : ""
         }"></div>
-        <div class="tooth-side tooth-side-left">${renderToothSide(
+        <div class="tooth-side tooth-side-left"${lowerLeftSideStyle}>${renderToothSide(
           chart.lowerLeft
         )}</div>
       </div>
