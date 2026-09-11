@@ -532,6 +532,7 @@ function OrderEntryModal() {
   const [selectedItemId, setSelectedItemId] = useState<number | "">("");
   const [displayWorkName, setDisplayWorkName] = useState("");
   const [price, setPrice] = useState("");
+  const [originalCustomerPrice, setOriginalCustomerPrice] = useState<string | null>(null);
   const [baseUpSupport, setBaseUpSupport] = useState(false);
   const [deliveryDate, setDeliveryDate] = useState("");
   const [orderQuantity, setOrderQuantity] = useState("1");
@@ -545,13 +546,19 @@ function OrderEntryModal() {
   const [isDragActive, setIsDragActive] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [isOrderSubmitting, setIsOrderSubmitting] = useState(false);
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
   const [isPatientSuccessModalOpen, setIsPatientSuccessModalOpen] = useState(false);
+  const [customerPriceUpdateConfirm, setCustomerPriceUpdateConfirm] = useState<{
+    currentPrice: string;
+    nextPrice: string;
+  } | null>(null);
   const [addMasterLevel, setAddMasterLevel] = useState<WorkItemMasterAddLevel | null>(null);
   const [addMasterName, setAddMasterName] = useState("");
   const [addMasterError, setAddMasterError] = useState("");
   const [isAddingMaster, setIsAddingMaster] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isOrderSubmittingRef = useRef(false);
 
   const filteredPatients = patients.filter((patient) =>
     patient.patient_name.toLowerCase().includes(patientQuery.toLowerCase())
@@ -882,8 +889,11 @@ function OrderEntryModal() {
   useEffect(() => {
     if (customerId === null || selectedWorkItem === null) {
       setPrice("");
+      setOriginalCustomerPrice(null);
       return;
     }
+
+    setOriginalCustomerPrice(null);
 
     const controller = new AbortController();
     const query = new URLSearchParams({
@@ -907,11 +917,14 @@ function OrderEntryModal() {
           const errorBody = (await response.json().catch(() => null)) as { error?: string } | null;
           console.warn("Failed to fetch customer price", errorBody?.error ?? response.statusText);
           setPrice("");
+          setOriginalCustomerPrice(null);
           return;
         }
 
         const data = (await response.json()) as { price: string | number | null };
-        setPrice(data.price === null || data.price === undefined ? "" : String(data.price));
+        const fetchedPrice = data.price === null || data.price === undefined ? "" : String(data.price);
+        setPrice(fetchedPrice);
+        setOriginalCustomerPrice(fetchedPrice === "" ? null : fetchedPrice);
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
@@ -919,6 +932,7 @@ function OrderEntryModal() {
 
         console.error("Customer price fetch failed", error);
         setPrice("");
+        setOriginalCustomerPrice(null);
       }
     };
 
@@ -1012,6 +1026,7 @@ function OrderEntryModal() {
         setSelectedWorkItem(null);
         setWorkItemQuery("");
         setPrice("");
+        setOriginalCustomerPrice(null);
       } else if (addMasterLevel === "sub_category") {
         const categoryId = selectedCategoryId as number;
         const subCategories = await loadSubCategories(categoryId);
@@ -1023,6 +1038,7 @@ function OrderEntryModal() {
         setSelectedWorkItem(null);
         setWorkItemQuery("");
         setPrice("");
+        setOriginalCustomerPrice(null);
       } else {
         const categoryId = selectedCategoryId as number;
         const subCategoryId = selectedSubCategoryId as number;
@@ -1035,6 +1051,8 @@ function OrderEntryModal() {
         );
         const nextName = `${selectedSubCategory?.name ?? ""} ${created.name}`.trim();
         setDisplayWorkName(nextName);
+        setPrice("");
+        setOriginalCustomerPrice(null);
         setSelectedWorkItem({
           id: created.id,
           item_name: nextName,
@@ -1073,7 +1091,9 @@ function OrderEntryModal() {
     setSelectedItemId("");
     setDisplayWorkName("");
     setPrice("");
+    setOriginalCustomerPrice(null);
     setBaseUpSupport(false);
+    setCustomerPriceUpdateConfirm(null);
     setDeliveryDate("");
     setOrderQuantity("1");
     setToothType("permanent");
@@ -1141,7 +1161,11 @@ function OrderEntryModal() {
     handleFile(file);
   };
 
-  const submitOrder = async () => {
+  const submitOrder = async (confirmedCustomerPriceUpdate = false) => {
+    if (isOrderSubmittingRef.current) {
+      return;
+    }
+
     if (customerId === null) {
       setSubmitSuccess(false);
       setSubmitError("歯科医院を選択してください");
@@ -1160,6 +1184,22 @@ function OrderEntryModal() {
       return;
     }
 
+    const currentPrice = price.trim();
+    const shouldConfirmCustomerPriceUpdate =
+      originalCustomerPrice !== null &&
+      currentPrice !== "" &&
+      Number.isFinite(Number(originalCustomerPrice)) &&
+      Number.isFinite(Number(currentPrice)) &&
+      Number(originalCustomerPrice) !== Number(currentPrice);
+
+    if (shouldConfirmCustomerPriceUpdate && !confirmedCustomerPriceUpdate) {
+      setCustomerPriceUpdateConfirm({
+        currentPrice: originalCustomerPrice,
+        nextPrice: currentPrice,
+      });
+      return;
+    }
+
     const formData = new FormData();
     formData.append("customer_id", String(customerId));
     formData.append("patient_id", String(patientId));
@@ -1171,9 +1211,10 @@ function OrderEntryModal() {
     formData.append("work_name", selectedWorkItem.item_name);
     formData.append("base_up_support_target", String(baseUpSupport));
     formData.append("quantity", orderQuantity);
-    if (price.trim() !== "") {
-      formData.append("price", price);
+    if (currentPrice !== "") {
+      formData.append("price", currentPrice);
     }
+    formData.append("update_customer_price", String(shouldConfirmCustomerPriceUpdate));
     formData.append("order_date", new Date().toISOString());
     formData.append("delivery_date", deliveryDate || new Date().toISOString());
     formData.append("insurance_type", selectedWorkItem.type === "insurance" ? "保険" : "自費");
@@ -1188,6 +1229,9 @@ function OrderEntryModal() {
     if (pdfFile) {
       formData.append("pdf", pdfFile);
     }
+
+    isOrderSubmittingRef.current = true;
+    setIsOrderSubmitting(true);
 
     try {
       const response = await fetch("/orders", {
@@ -1208,6 +1252,9 @@ function OrderEntryModal() {
       setSubmitSuccess(false);
       setIsSuccessModalOpen(false);
       setSubmitError("受注登録に失敗しました");
+    } finally {
+      isOrderSubmittingRef.current = false;
+      setIsOrderSubmitting(false);
     }
   };
 
@@ -1359,6 +1406,52 @@ function OrderEntryModal() {
         </div>
       ) : null}
 
+      {customerPriceUpdateConfirm ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-[1px]">
+          <div className="w-full max-w-sm rounded-[18px] border border-[#E9E9E9] bg-white px-6 py-6 shadow-[0_18px_48px_rgba(0,0,0,0.14)]">
+            <h3 className="text-lg font-bold text-[#1F1F1F]">医院別価格の変更</h3>
+            <p className="mt-3 text-sm text-[#666666]">医院別価格を変更します。</p>
+
+            <div className="mt-5 rounded-xl border border-[#E9E9E9] bg-[#FCFCFC] px-4 py-3">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-xs font-semibold text-[#666666]">現在の価格：</span>
+                <span className="text-sm font-bold text-[#222222]">
+                  {formatYen(customerPriceUpdateConfirm.currentPrice)}
+                </span>
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-4 border-t border-[#E9E9E9] pt-3">
+                <span className="text-xs font-semibold text-[#666666]">変更後価格：</span>
+                <span className="text-sm font-bold text-[#222222]">
+                  {formatYen(customerPriceUpdateConfirm.nextPrice)}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCustomerPriceUpdateConfirm(null)}
+                disabled={isOrderSubmitting}
+                className="rounded-lg border border-[#E1E1E1] bg-white px-4 py-2 text-sm font-semibold text-[#444444] transition-colors duration-200 ease-[ease] hover:bg-[#F8F8F8] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomerPriceUpdateConfirm(null);
+                  void submitOrder(true);
+                }}
+                disabled={isOrderSubmitting}
+                className="rounded-lg bg-[#fff362] px-5 py-2 text-sm font-bold text-[#222222] transition-colors duration-200 ease-[ease] hover:bg-[#f4e64f] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                変更して保存
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {addMasterLevel !== null ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-[1px]">
           <div className="w-full max-w-sm rounded-[18px] border border-[#E9E9E9] bg-white px-6 py-6 shadow-[0_18px_48px_rgba(0,0,0,0.14)]">
@@ -1439,6 +1532,8 @@ function OrderEntryModal() {
                   setWorkItemQuery("");
                   setWorkItemCandidates([]);
                   setWorkItemError("");
+                  setPrice("");
+                  setOriginalCustomerPrice(null);
                 }}
                 disabled={isCustomersLoading || Boolean(customersError)}
                 className={`h-10 w-full rounded-lg border bg-white px-3 text-sm font-medium outline-none transition-colors focus:border-[#F0B132] disabled:opacity-100 ${
@@ -1486,6 +1581,7 @@ function OrderEntryModal() {
 	                      setSelectedItemId("");
 	                      setDisplayWorkName("");
 	                      setPrice("");
+	                      setOriginalCustomerPrice(null);
 	                      setSelectedWorkItem(null);
 	                      setWorkItemCandidates([]);
 	                      setWorkItemError("");
@@ -1507,6 +1603,7 @@ function OrderEntryModal() {
 	                      setSelectedItemId("");
 	                      setDisplayWorkName("");
 	                      setPrice("");
+	                      setOriginalCustomerPrice(null);
 	                      setSelectedWorkItem(null);
 	                      setWorkItemCandidates([]);
 	                      setWorkItemError("");
@@ -1545,6 +1642,8 @@ function OrderEntryModal() {
                         setDisplayWorkName("");
                         setSelectedWorkItem(null);
                         setWorkItemQuery("");
+                        setPrice("");
+                        setOriginalCustomerPrice(null);
                       }}
                       disabled={customerId === null}
                       className="h-10 w-[32%] min-w-0 shrink-0 rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132] disabled:bg-[#FAFAFA] disabled:text-[#999999]"
@@ -1572,6 +1671,8 @@ function OrderEntryModal() {
                         setDisplayWorkName("");
                         setSelectedWorkItem(null);
                         setWorkItemQuery("");
+                        setPrice("");
+                        setOriginalCustomerPrice(null);
                       }}
                       disabled={selectedCategoryId === ""}
                       className="h-10 w-[32%] min-w-0 shrink-0 rounded-lg border border-[#E2E2E2] bg-white px-3 text-sm font-medium text-[#333333] outline-none transition-colors focus:border-[#F0B132] disabled:bg-[#FAFAFA] disabled:text-[#999999]"
@@ -1602,6 +1703,8 @@ function OrderEntryModal() {
                           setDisplayWorkName("");
                           setSelectedWorkItem(null);
                           setWorkItemQuery("");
+                          setPrice("");
+                          setOriginalCustomerPrice(null);
                           return;
                         }
 
@@ -1616,6 +1719,8 @@ function OrderEntryModal() {
 
                         const nextName = `${selectedSubCategory?.name ?? ""} ${selectedItem.name}`.trim();
                         setDisplayWorkName(nextName);
+                        setPrice("");
+                        setOriginalCustomerPrice(null);
 	                        setSelectedWorkItem({
 	                          id: selectedItem.id,
 	                          item_name: nextName,

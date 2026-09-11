@@ -111,6 +111,11 @@ async function parseOrderBody(req: NextRequest) {
 
     price: formData.get("price"),
 
+    update_customer_price: parseBoolean(
+      formData.get("update_customer_price"),
+      false
+    ),
+
     quantity: formData.get("quantity"),
 
     tooth_numbers: formData
@@ -182,6 +187,7 @@ export async function POST(req: NextRequest) {
       work_name: body.work_name,
       base_up_support_target: body.base_up_support_target,
       price: body.price,
+      update_customer_price: body.update_customer_price,
       quantity: body.quantity,
       tooth_numbers: body.tooth_numbers,
       bridge: body.bridge,
@@ -225,6 +231,12 @@ export async function POST(req: NextRequest) {
     const unitPrice =
       parseOptionalPositiveDecimal(
         body.price
+      );
+
+    const updateCustomerPrice =
+      parseBoolean(
+        body.update_customer_price,
+        false
       );
 
     const quantity =
@@ -699,7 +711,31 @@ export async function POST(req: NextRequest) {
               console.error("[POST /orders] transaction step: customer_insurance_prices already exists", {
                 customer_id: body.customer_id,
                 insurance_item_id: insuranceItemId,
+                update_customer_price: updateCustomerPrice,
               });
+
+              if (updateCustomerPrice) {
+                console.error("[POST /orders] transaction step: customer_insurance_prices update start", {
+                  customer_id: body.customer_id,
+                  insurance_item_id: insuranceItemId,
+                  price: unitPrice,
+                });
+
+                await transaction.$executeRaw`
+                  UPDATE
+                    customer_insurance_prices
+                  SET
+                    price = ${unitPrice}
+                  WHERE
+                    customer_id =
+                      ${body.customer_id}
+                    AND
+                    insurance_item_id =
+                      ${insuranceItemId}
+                `;
+
+                console.error("[POST /orders] transaction step: customer_insurance_prices update success");
+              }
             }
           }
 
@@ -763,7 +799,31 @@ export async function POST(req: NextRequest) {
               console.error("[POST /orders] transaction step: customer_private_prices already exists", {
                 customer_id: body.customer_id,
                 private_item_master_id: privateItemMasterId,
+                update_customer_price: updateCustomerPrice,
               });
+
+              if (updateCustomerPrice) {
+                console.error("[POST /orders] transaction step: customer_private_prices update start", {
+                  customer_id: body.customer_id,
+                  private_item_master_id: privateItemMasterId,
+                  price: unitPrice,
+                });
+
+                await transaction.$executeRaw`
+                  UPDATE
+                    customer_private_prices
+                  SET
+                    price = ${unitPrice}
+                  WHERE
+                    customer_id =
+                      ${body.customer_id}
+                    AND
+                    private_item_master_id =
+                      ${privateItemMasterId}
+                `;
+
+                console.error("[POST /orders] transaction step: customer_private_prices update success");
+              }
             }
           }
 
