@@ -7,13 +7,15 @@ import { Prisma } from "@/lib/generated/prisma/client";
 import { requireAuthResponse } from "@/lib/auth";
 import { sanitizePathSegment } from "@/lib/document-storage";
 import { prisma } from "@/lib/prisma";
+import { GET as getSingleInvoicePdf } from "../../[id]/pdf/route";
 
 /*
  * まとめPDF（複数invoiceを1つのPDFとして表示）
  *
  * DB上のinvoice/invoice_items/invoice_deliveriesは一切変更しない。
  * 既存の単票PDF（app/invoices/[id]/pdf/route.ts）とは独立した
- * オンデマンド生成専用ルート（保存処理は行わない）。
+ * まとめPDF自体はオンデマンド生成専用ルート。
+ * 表示前に単票PDF routeを呼び、各invoiceの正規PDF保存を保証する。
  *
  * 以下は既存単票PDFの実装を参考に、必要な範囲だけ複製している
  * （既存route.tsの大規模リファクタリング・import化は行わない）。
@@ -118,6 +120,28 @@ function parseIds(value: string | null) {
   }
 
   return ids;
+}
+
+async function ensureSingleInvoicePdfsSaved(
+  request: Request,
+  invoiceIds: number[]
+) {
+  for (const invoiceId of invoiceIds) {
+    const response = await getSingleInvoicePdf(request, {
+      params: Promise.resolve({
+        id: String(invoiceId),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new GroupInvoiceRequestError(
+        `単票請求書PDFの保存に失敗しました: invoice_id=${invoiceId}`,
+        response.status
+      );
+    }
+
+    await response.arrayBuffer();
+  }
 }
 
 function formatDate(date: Date | null, separator = "/") {
@@ -1403,6 +1427,8 @@ export async function GET(request: Request) {
         { status: 404 }
       );
     }
+
+    await ensureSingleInvoicePdfsSaved(request, requestedIds);
 
     const html = createGroupInvoiceHtml(data);
 
