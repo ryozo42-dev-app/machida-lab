@@ -99,6 +99,10 @@ export async function GET(request: Request) {
         prisma.order_items.findMany({
           where: { order_id: { in: orderIds } },
           orderBy: { id: "asc" },
+          include: {
+            delivery_items: { select: { id: true } },
+            invoice_items: { select: { id: true } },
+          },
         }),
         prisma.order_teeth.findMany({
           where: { order_id: { in: orderIds } },
@@ -201,6 +205,19 @@ export async function GET(request: Request) {
       const pdf = orderFiles.find((file) => file.order_id === order.id);
       const isBridge = bridgeByOrderId.get(order.id) ?? false;
       const isBaseUpSupportTarget = items.some((item) => item.base_up_support_target);
+      const deleteBlockedReason = items.some((item) => item.delivery_items !== null)
+        ? "この案件は納品済みのため削除できません"
+        : items.some((item) => item.invoice_items.length > 0)
+          ? "この案件は請求済みのため削除できません"
+          : null;
+      const editBlockedReason =
+        items.length !== 1
+          ? "複数の作業内容を持つ案件は編集できません"
+          : items[0].delivery_items !== null
+            ? "この案件は納品済みのため編集できません"
+            : items[0].invoice_items.length > 0
+              ? "この案件は請求済みのため編集できません"
+              : null;
 
       return {
         id: order.id,
@@ -220,6 +237,10 @@ export async function GET(request: Request) {
         pdfUrl: pdf ? `/works/files/${pdf.id}` : null,
         isBridge,
         baseUpSupportTarget: isBaseUpSupportTarget,
+        editable: editBlockedReason === null,
+        editBlockedReason,
+        deletable: deleteBlockedReason === null,
+        deleteBlockedReason,
       };
     });
 

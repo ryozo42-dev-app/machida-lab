@@ -82,6 +82,7 @@ export async function GET(request: NextRequest) {
       where: {
         work_status: "completed",
         billed: false,
+        deleted_at: null,
         ...(customerId === null ? {} : { customer_id: customerId }),
       },
       orderBy: [{ delivery_date: "asc" }, { id: "asc" }],

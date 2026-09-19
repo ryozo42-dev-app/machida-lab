@@ -78,6 +78,7 @@ export async function GET() {
         SELECT COUNT(DISTINCT o.id)::int AS count
         FROM orders o
         WHERE o.delivery_date = ${tomorrow}::date
+          AND o.deleted_at IS NULL
           AND EXISTS (
             SELECT 1
             FROM order_items oi
@@ -91,12 +92,14 @@ export async function GET() {
           work_status: {
             in: ["pending", "in_progress"],
           },
+          deleted_at: null,
         },
       }),
       prisma.$queryRaw<CountRow[]>`
         SELECT COUNT(DISTINCT o.id)::int AS count
         FROM orders o
         WHERE o.delivery_date < ${today}::date
+          AND o.deleted_at IS NULL
           AND EXISTS (
             SELECT 1
             FROM order_items oi
@@ -111,6 +114,7 @@ export async function GET() {
             gte: monthStart,
             lte: monthEnd,
           },
+          deleted_at: null,
         },
       }),
     ]);

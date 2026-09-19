@@ -68,6 +68,40 @@ type WorkItemOption = {
   type: WorkItemType;
 };
 
+async function fetchCustomerPrice(
+  customerId: number,
+  workItem: Pick<WorkItemOption, "id" | "type">,
+  signal?: AbortSignal
+) {
+  const query = new URLSearchParams({
+    customer_id: String(customerId),
+    type: workItem.type,
+  });
+
+  if (workItem.type === "insurance") {
+    query.set("insurance_item_id", String(workItem.id));
+  } else {
+    query.set("private_item_master_id", String(workItem.id));
+  }
+
+  const response = await fetch(`/api/customer-prices?${query.toString()}`, {
+    signal,
+  });
+  const data = (await response.json().catch(() => null)) as
+    | { price?: string | number | null; error?: string }
+    | null;
+
+  if (!response.ok) {
+    throw new Error(data?.error ?? "医院別価格の取得に失敗しました");
+  }
+
+  if (!data || !("price" in data) || data.price === undefined) {
+    throw new Error("医院別価格の取得結果が正しくありません");
+  }
+
+  return data.price === null ? null : String(data.price);
+}
+
 type InsuranceCategoryOption = {
   id: number;
   name: string;
@@ -118,6 +152,23 @@ function toFdiToothNumber(toothId: string) {
   return null;
 }
 
+function fromFdiToothNumber(toothNumber: string) {
+  if (!/^[1-8][1-8]$/.test(toothNumber)) {
+    return null;
+  }
+
+  const quadrant = Number(toothNumber[0]);
+  const position = Number(toothNumber[1]);
+  const jaw = [1, 2, 5, 6].includes(quadrant) ? "上顎" : "下顎";
+  const side = [1, 4, 5, 8].includes(quadrant) ? "R" : "L";
+  const tooth =
+    quadrant >= 5
+      ? ["", "A", "B", "C", "D", "E"][position]
+      : String(position);
+
+  return tooth ? `${jaw}-${side}-${tooth}` : null;
+}
+
 type WorkRecord = {
   id: number;
   orderItemId: number | null;
@@ -134,6 +185,38 @@ type WorkRecord = {
   pdfUrl: string | null;
   isBridge: boolean;
   baseUpSupportTarget: boolean;
+  editable: boolean;
+  editBlockedReason: string | null;
+  deletable: boolean;
+  deleteBlockedReason: string | null;
+};
+
+type DeletedWorkRecord = {
+  id: number;
+  clinic: string;
+  patient: string;
+  workType: string;
+  deliveryDate: string;
+  deletedAt: string;
+};
+
+type EditOrderDetails = {
+  id: number;
+  customer_id: number;
+  patient: PatientOption;
+  type: WorkItemType;
+  item_id: number;
+  category_id: number;
+  sub_category_id: number;
+  work_name: string;
+  price: string;
+  quantity: number;
+  delivery_date: string;
+  tooth_numbers: string[];
+  bridge: boolean;
+  base_up_support_target: boolean;
+  remarks: string;
+  order_file: { id: number; file_name: string | null } | null;
 };
 
 function formatToothDisplay(value: string) {
@@ -275,6 +358,27 @@ function formatDashboardFetchedAt(value: string | null) {
     return "-";
   }
 
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return `${values.year}/${values.month}/${values.day} ${values.hour}:${values.minute}`;
+}
+
+function formatJstDateTime(value: string) {
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
@@ -518,7 +622,14 @@ function ToothRow({
   );
 }
 
-function OrderEntryModal() {
+type OrderEntryModalProps = {
+  editOrderId?: number;
+  onCancel?: () => void;
+  onSaved?: () => void;
+};
+
+function OrderEntryModal({ editOrderId, onCancel, onSaved }: OrderEntryModalProps = {}) {
+  const isEditMode = editOrderId !== undefined;
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [customerId, setCustomerId] = useState<number | null>(null);
   const [isCustomersLoading, setIsCustomersLoading] = useState(true);
@@ -544,6 +655,8 @@ function OrderEntryModal() {
   const [displayWorkName, setDisplayWorkName] = useState("");
   const [price, setPrice] = useState("");
   const [originalCustomerPrice, setOriginalCustomerPrice] = useState<string | null>(null);
+  const [isCustomerPriceLoading, setIsCustomerPriceLoading] = useState(false);
+  const [customerPriceError, setCustomerPriceError] = useState("");
   const [baseUpSupport, setBaseUpSupport] = useState(false);
   const [deliveryDate, setDeliveryDate] = useState("");
   const [orderQuantity, setOrderQuantity] = useState("1");
@@ -560,16 +673,20 @@ function OrderEntryModal() {
   const [isOrderSubmitting, setIsOrderSubmitting] = useState(false);
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
   const [isPatientSuccessModalOpen, setIsPatientSuccessModalOpen] = useState(false);
-  const [customerPriceUpdateConfirm, setCustomerPriceUpdateConfirm] = useState<{
-    currentPrice: string;
-    nextPrice: string;
-  } | null>(null);
+  const [customerPriceUpdateConfirm, setCustomerPriceUpdateConfirm] = useState<
+    | { mode: "update"; currentPrice: string; nextPrice: string }
+    | { mode: "create"; nextPrice: string }
+    | null
+  >(null);
   const [addMasterLevel, setAddMasterLevel] = useState<WorkItemMasterAddLevel | null>(null);
   const [addMasterName, setAddMasterName] = useState("");
   const [addMasterError, setAddMasterError] = useState("");
   const [isAddingMaster, setIsAddingMaster] = useState(false);
+  const [isEditLoading, setIsEditLoading] = useState(isEditMode);
+  const [editOrderFileName, setEditOrderFileName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isOrderSubmittingRef = useRef(false);
+  const skipNextCustomerPriceFetchRef = useRef<string | null>(null);
 
   const filteredPatients = patients.filter((patient) =>
     patient.patient_name.toLowerCase().includes(patientQuery.toLowerCase())
@@ -654,7 +771,9 @@ function OrderEntryModal() {
         }
 
         setCustomers(data);
-        setCustomerId(data[0].id);
+        if (!isEditMode) {
+          setCustomerId(data[0].id);
+        }
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
@@ -672,7 +791,118 @@ function OrderEntryModal() {
     void loadCustomers();
 
     return () => controller.abort();
-  }, []);
+  }, [isEditMode]);
+
+  useEffect(() => {
+    if (!isEditMode) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const loadOrder = async () => {
+      try {
+        setIsEditLoading(true);
+        setSubmitError("");
+
+        const response = await fetch(`/orders/${editOrderId}`, {
+          signal: controller.signal,
+        });
+        const data = (await response.json().catch(() => null)) as
+          | EditOrderDetails
+          | { error?: string }
+          | null;
+
+        if (!response.ok) {
+          throw new Error(
+            data && "error" in data && data.error
+              ? data.error
+              : "案件情報の取得に失敗しました"
+          );
+        }
+
+        const details = data as EditOrderDetails;
+        const selectionKey = `${details.customer_id}:${details.type}:${details.item_id}`;
+        let loadedCustomerPrice: string | null = null;
+        let customerPriceLoadError = "";
+
+        try {
+          loadedCustomerPrice = await fetchCustomerPrice(
+            details.customer_id,
+            { id: details.item_id, type: details.type },
+            controller.signal
+          );
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+
+          console.error("Customer price fetch failed", error);
+          customerPriceLoadError =
+            error instanceof Error ? error.message : "医院別価格の取得に失敗しました";
+        }
+
+        skipNextCustomerPriceFetchRef.current = selectionKey;
+        setCustomerPriceError(customerPriceLoadError);
+        setOriginalCustomerPrice(loadedCustomerPrice);
+        if (customerPriceLoadError) {
+          setSubmitError(customerPriceLoadError);
+        }
+        setCustomerId(details.customer_id);
+        setPatientId(details.patient.id);
+        setPatientQuery(details.patient.patient_name);
+        setPatientKana(details.patient.patient_kana ?? "");
+        setIsPatientSelected(true);
+        setWorkItemType(details.type);
+        setSelectedCategoryId(details.category_id);
+        setSelectedSubCategoryId(details.sub_category_id);
+        setSelectedItemId(details.item_id);
+        setDisplayWorkName(details.work_name);
+        setSelectedWorkItem({
+          id: details.item_id,
+          item_name: details.work_name,
+          type: details.type,
+        });
+        setWorkItemQuery(details.work_name);
+        setPrice(details.price);
+        setBaseUpSupport(details.base_up_support_target);
+        setDeliveryDate(details.delivery_date);
+        setOrderQuantity(String(details.quantity));
+        setBridge(details.bridge);
+        setSelectedTeeth(
+          new Set(
+            details.tooth_numbers
+              .map(fromFdiToothNumber)
+              .filter((tooth): tooth is string => tooth !== null)
+          )
+        );
+        setToothType(
+          details.tooth_numbers.some((tooth) => /^[5-8]/.test(tooth))
+            ? "deciduous"
+            : "permanent"
+        );
+        setNote(details.remarks);
+        setEditOrderFileName(details.order_file?.file_name ?? null);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        console.error(error);
+        setSubmitError(
+          error instanceof Error ? error.message : "案件情報の取得に失敗しました"
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsEditLoading(false);
+        }
+      }
+    };
+
+    void loadOrder();
+
+    return () => controller.abort();
+  }, [editOrderId, isEditMode]);
 
   useEffect(() => {
     if (workItemType !== "private") {
@@ -901,49 +1131,49 @@ function OrderEntryModal() {
     if (customerId === null || selectedWorkItem === null) {
       setPrice("");
       setOriginalCustomerPrice(null);
+      setIsCustomerPriceLoading(false);
+      setCustomerPriceError("");
       return;
     }
 
-    setOriginalCustomerPrice(null);
+    const selectionKey = `${customerId}:${selectedWorkItem.type}:${selectedWorkItem.id}`;
+
+    if (skipNextCustomerPriceFetchRef.current === selectionKey) {
+      skipNextCustomerPriceFetchRef.current = null;
+      setIsCustomerPriceLoading(false);
+      return;
+    }
 
     const controller = new AbortController();
-    const query = new URLSearchParams({
-      customer_id: String(customerId),
-      type: selectedWorkItem.type,
-    });
-
-    if (selectedWorkItem.type === "insurance") {
-      query.set("insurance_item_id", String(selectedWorkItem.id));
-    } else {
-      query.set("private_item_master_id", String(selectedWorkItem.id));
-    }
+    setOriginalCustomerPrice(null);
+    setCustomerPriceError("");
+    setIsCustomerPriceLoading(true);
 
     const loadCustomerPrice = async () => {
       try {
-        const response = await fetch(`/api/customer-prices?${query.toString()}`, {
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          const errorBody = (await response.json().catch(() => null)) as { error?: string } | null;
-          console.warn("Failed to fetch customer price", errorBody?.error ?? response.statusText);
-          setPrice("");
-          setOriginalCustomerPrice(null);
-          return;
-        }
-
-        const data = (await response.json()) as { price: string | number | null };
-        const fetchedPrice = data.price === null || data.price === undefined ? "" : String(data.price);
-        setPrice(fetchedPrice);
-        setOriginalCustomerPrice(fetchedPrice === "" ? null : fetchedPrice);
+        const fetchedPrice = await fetchCustomerPrice(
+          customerId,
+          selectedWorkItem,
+          controller.signal
+        );
+        setPrice(fetchedPrice ?? "");
+        setOriginalCustomerPrice(fetchedPrice);
+        setSubmitError("");
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
         }
 
         console.error("Customer price fetch failed", error);
-        setPrice("");
+        const message =
+          error instanceof Error ? error.message : "医院別価格の取得に失敗しました";
         setOriginalCustomerPrice(null);
+        setCustomerPriceError(message);
+        setSubmitError(message);
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsCustomerPriceLoading(false);
+        }
       }
     };
 
@@ -1103,6 +1333,7 @@ function OrderEntryModal() {
     setDisplayWorkName("");
     setPrice("");
     setOriginalCustomerPrice(null);
+    setCustomerPriceError("");
     setBaseUpSupport(false);
     setCustomerPriceUpdateConfirm(null);
     setDeliveryDate("");
@@ -1173,7 +1404,13 @@ function OrderEntryModal() {
   };
 
   const submitOrder = async (confirmedCustomerPriceUpdate = false) => {
-    if (isOrderSubmittingRef.current) {
+    if (isOrderSubmittingRef.current || isEditLoading || isCustomerPriceLoading) {
+      return;
+    }
+
+    if (customerPriceError) {
+      setSubmitSuccess(false);
+      setSubmitError(customerPriceError);
       return;
     }
 
@@ -1196,65 +1433,118 @@ function OrderEntryModal() {
     }
 
     const currentPrice = price.trim();
+    const parsedPrice = Number(currentPrice);
+    const parsedOriginalCustomerPrice = Number(originalCustomerPrice);
     const shouldConfirmCustomerPriceUpdate =
       originalCustomerPrice !== null &&
       currentPrice !== "" &&
-      Number.isFinite(Number(originalCustomerPrice)) &&
-      Number.isFinite(Number(currentPrice)) &&
-      Number(originalCustomerPrice) !== Number(currentPrice);
+      Number.isFinite(parsedOriginalCustomerPrice) &&
+      Number.isFinite(parsedPrice) &&
+      parsedOriginalCustomerPrice !== parsedPrice;
+    const shouldConfirmCustomerPriceCreate =
+      isEditMode &&
+      originalCustomerPrice === null &&
+      currentPrice !== "" &&
+      Number.isFinite(parsedPrice);
+    const shouldConfirmCustomerPrice =
+      shouldConfirmCustomerPriceUpdate || shouldConfirmCustomerPriceCreate;
 
-    if (shouldConfirmCustomerPriceUpdate && !confirmedCustomerPriceUpdate) {
-      setCustomerPriceUpdateConfirm({
-        currentPrice: originalCustomerPrice,
-        nextPrice: currentPrice,
-      });
+    if (shouldConfirmCustomerPrice && !confirmedCustomerPriceUpdate) {
+      setCustomerPriceUpdateConfirm(
+        shouldConfirmCustomerPriceCreate
+          ? { mode: "create", nextPrice: currentPrice }
+          : {
+              mode: "update",
+              currentPrice: originalCustomerPrice as string,
+              nextPrice: currentPrice,
+            }
+      );
       return;
     }
 
-    const formData = new FormData();
-    formData.append("customer_id", String(customerId));
-    formData.append("patient_id", String(patientId));
-    if (selectedWorkItem.type === "insurance") {
-      formData.append("insurance_item_id", String(selectedWorkItem.id));
-    } else {
-      formData.append("private_item_master_id", String(selectedWorkItem.id));
-    }
-    formData.append("work_name", selectedWorkItem.item_name);
-    formData.append("base_up_support_target", String(baseUpSupport));
-    formData.append("quantity", orderQuantity);
-    if (currentPrice !== "") {
-      formData.append("price", currentPrice);
-    }
-    formData.append("update_customer_price", String(shouldConfirmCustomerPriceUpdate));
-    formData.append("order_date", new Date().toISOString());
-    formData.append("delivery_date", deliveryDate || new Date().toISOString());
-    formData.append("insurance_type", selectedWorkItem.type === "insurance" ? "保険" : "自費");
-    formData.append("remarks", note);
-    formData.append("bridge", String(bridge));
+    const updateCustomerPrice =
+      confirmedCustomerPriceUpdate && shouldConfirmCustomerPrice;
 
-    Array.from(selectedTeeth)
+    const toothNumbers = Array.from(selectedTeeth)
       .map(toFdiToothNumber)
-      .filter((toothNumber): toothNumber is string => toothNumber !== null)
-      .forEach((toothNumber) => formData.append("tooth_numbers", toothNumber));
-
-    if (pdfFile) {
-      formData.append("pdf", pdfFile);
-    }
+      .filter((toothNumber): toothNumber is string => toothNumber !== null);
 
     isOrderSubmittingRef.current = true;
     setIsOrderSubmitting(true);
 
     try {
-      const response = await fetch("/orders", {
-        method: "POST",
-        body: formData,
-      });
+      let response: Response;
+
+      if (isEditMode) {
+        response = await fetch(`/orders/${editOrderId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            customer_id: customerId,
+            patient_id: patientId,
+            type: selectedWorkItem.type,
+            item_id: selectedWorkItem.id,
+            work_name: selectedWorkItem.item_name,
+            base_up_support_target: baseUpSupport,
+            quantity: Number(orderQuantity),
+            price: currentPrice === "" ? null : currentPrice,
+            update_customer_price: updateCustomerPrice,
+            delivery_date: deliveryDate,
+            remarks: note,
+            bridge,
+            tooth_numbers: toothNumbers,
+          }),
+        });
+      } else {
+        const formData = new FormData();
+        formData.append("customer_id", String(customerId));
+        formData.append("patient_id", String(patientId));
+        if (selectedWorkItem.type === "insurance") {
+          formData.append("insurance_item_id", String(selectedWorkItem.id));
+        } else {
+          formData.append("private_item_master_id", String(selectedWorkItem.id));
+        }
+        formData.append("work_name", selectedWorkItem.item_name);
+        formData.append("base_up_support_target", String(baseUpSupport));
+        formData.append("quantity", orderQuantity);
+        if (currentPrice !== "") {
+          formData.append("price", currentPrice);
+        }
+        formData.append("update_customer_price", String(shouldConfirmCustomerPriceUpdate));
+        formData.append("order_date", new Date().toISOString());
+        formData.append("delivery_date", deliveryDate || new Date().toISOString());
+        formData.append("insurance_type", selectedWorkItem.type === "insurance" ? "保険" : "自費");
+        formData.append("remarks", note);
+        formData.append("bridge", String(bridge));
+        toothNumbers.forEach((toothNumber) => formData.append("tooth_numbers", toothNumber));
+
+        if (pdfFile) {
+          formData.append("pdf", pdfFile);
+        }
+
+        response = await fetch("/orders", {
+          method: "POST",
+          body: formData,
+        });
+      }
 
       if (!response.ok) {
-        throw new Error("Order registration failed");
+        const errorBody = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(
+          errorBody?.error ??
+            (isEditMode ? "案件の更新に失敗しました" : "受注登録に失敗しました")
+        );
       }
 
       setSubmitError("");
+
+      if (isEditMode) {
+        onSaved?.();
+        return;
+      }
+
       resetOrderForm();
       setSubmitSuccess(true);
       setIsSuccessModalOpen(true);
@@ -1262,7 +1552,13 @@ function OrderEntryModal() {
       console.error(error);
       setSubmitSuccess(false);
       setIsSuccessModalOpen(false);
-      setSubmitError("受注登録に失敗しました");
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : isEditMode
+            ? "案件の更新に失敗しました"
+            : "受注登録に失敗しました"
+      );
     } finally {
       isOrderSubmittingRef.current = false;
       setIsOrderSubmitting(false);
@@ -1351,16 +1647,22 @@ function OrderEntryModal() {
 
   return (
     <section
-      className="flex h-full min-h-0 w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6"
-      aria-label="受注入力"
+      className={`flex min-h-0 w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6 ${
+        isEditMode ? "h-auto max-h-[calc(100vh-2rem)]" : "h-full"
+      }`}
+      aria-label={isEditMode ? "案件編集" : "受注入力"}
     >
       <div className="h-[14px] w-full rounded-t-[20px] bg-[#fff362]" aria-hidden="true" />
 
       <div className="mt-3 flex items-start gap-3">
         <span className="mt-1 h-10 w-[5px] rounded-full bg-[#fff362]" aria-hidden="true" />
         <div>
-          <h2 className="text-2xl font-bold text-[#222222]">受注入力</h2>
-          <p className="mt-1 text-xs text-[#666666]">新しい受注を登録します</p>
+          <h2 className="text-2xl font-bold text-[#222222]">
+            {isEditMode ? "案件編集" : "受注入力"}
+          </h2>
+          <p className="mt-1 text-xs text-[#666666]">
+            {isEditMode ? "登録済みの案件を編集します" : "新しい受注を登録します"}
+          </p>
         </div>
       </div>
 
@@ -1420,18 +1722,38 @@ function OrderEntryModal() {
       {customerPriceUpdateConfirm ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-[1px]">
           <div className="w-full max-w-sm rounded-[18px] border border-[#E9E9E9] bg-white px-6 py-6 shadow-[0_18px_48px_rgba(0,0,0,0.14)]">
-            <h3 className="text-lg font-bold text-[#1F1F1F]">医院別価格の変更</h3>
-            <p className="mt-3 text-sm text-[#666666]">医院別価格を変更します。</p>
+            <h3 className="text-lg font-bold text-[#1F1F1F]">
+              {customerPriceUpdateConfirm.mode === "create"
+                ? "単価未登録"
+                : "医院別価格の変更"}
+            </h3>
+            <p className="mt-3 text-sm text-[#666666]">
+              {customerPriceUpdateConfirm.mode === "create"
+                ? "この医院にはこの作業の単価が登録されていません。入力した価格を医院別単価として登録しますか？"
+                : "医院別価格を変更しますか？"}
+            </p>
 
             <div className="mt-5 rounded-xl border border-[#E9E9E9] bg-[#FCFCFC] px-4 py-3">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-xs font-semibold text-[#666666]">現在の価格：</span>
-                <span className="text-sm font-bold text-[#222222]">
-                  {formatYen(customerPriceUpdateConfirm.currentPrice)}
+              {customerPriceUpdateConfirm.mode === "update" ? (
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-xs font-semibold text-[#666666]">現在の価格：</span>
+                  <span className="text-sm font-bold text-[#222222]">
+                    {formatYen(customerPriceUpdateConfirm.currentPrice)}
+                  </span>
+                </div>
+              ) : null}
+              <div
+                className={`flex items-center justify-between gap-4 ${
+                  customerPriceUpdateConfirm.mode === "update"
+                    ? "mt-3 border-t border-[#E9E9E9] pt-3"
+                    : ""
+                }`}
+              >
+                <span className="text-xs font-semibold text-[#666666]">
+                  {customerPriceUpdateConfirm.mode === "create"
+                    ? "登録する価格："
+                    : "変更後価格："}
                 </span>
-              </div>
-              <div className="mt-3 flex items-center justify-between gap-4 border-t border-[#E9E9E9] pt-3">
-                <span className="text-xs font-semibold text-[#666666]">変更後価格：</span>
                 <span className="text-sm font-bold text-[#222222]">
                   {formatYen(customerPriceUpdateConfirm.nextPrice)}
                 </span>
@@ -1803,7 +2125,11 @@ function OrderEntryModal() {
               </select>
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-1 rounded-[14px] border border-[#E7E7E7] bg-white p-2">
+          <div
+            className={`flex min-h-0 flex-col rounded-[14px] border border-[#E7E7E7] bg-white ${
+              isEditMode ? "flex-none gap-1 p-1.5" : "flex-1 gap-1 p-2"
+            }`}
+          >
             <div className="flex items-center justify-between gap-4">
               <label className="text-xs font-semibold text-[#333333]">歯式</label>
               <div className="flex items-center gap-4">
@@ -1840,7 +2166,13 @@ function OrderEntryModal() {
               </div>
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col justify-evenly rounded-lg border border-[#EFEFEF] bg-[#FCFCFC] px-1 py-1.5">
+            <div
+              className={`flex min-h-0 flex-col rounded-lg border border-[#EFEFEF] bg-[#FCFCFC] ${
+                isEditMode
+                  ? "flex-none gap-0.5 px-1 py-0.5"
+                  : "flex-1 justify-evenly px-1 py-1.5"
+              }`}
+            >
               <ToothRow
                 jawLabel="上顎"
                 rightTeeth={teethRight}
@@ -1923,17 +2255,24 @@ function OrderEntryModal() {
             />
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-1.5">
-            <div className="flex min-h-0 flex-1 flex-col space-y-1.5">
+          <div className={`flex min-h-0 flex-col gap-1.5 ${isEditMode ? "flex-none" : "flex-1"}`}>
+            <div className={`flex min-h-0 flex-col space-y-1.5 ${isEditMode ? "flex-none" : "flex-1"}`}>
               <label className="text-xs font-semibold text-[#333333]">指示書（PDF）</label>
               <div
                 onDragOver={(event) => {
                   event.preventDefault();
-                  setIsDragActive(true);
+                  if (!isEditMode) setIsDragActive(true);
                 }}
-                onDragLeave={() => setIsDragActive(false)}
-                onDrop={handleDrop}
-                className={`flex min-h-[64px] flex-1 items-center rounded-[12px] border-2 border-dashed p-2 transition-colors ${
+                onDragLeave={() => {
+                  if (!isEditMode) setIsDragActive(false);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (!isEditMode) handleDrop(event);
+                }}
+                className={`flex items-center rounded-[12px] border-2 border-dashed transition-colors ${
+                  isEditMode ? "h-12 min-h-0 flex-none p-1.5" : "min-h-[64px] flex-1 p-2"
+                } ${
                   isDragActive ? "border-[#fff362] bg-[#FFF8EA]" : "border-[#E3E3E3] bg-[#FCFCFC]"
                 }`}
               >
@@ -1942,20 +2281,29 @@ function OrderEntryModal() {
                   type="file"
                   accept="application/pdf"
                   className="hidden"
+                  disabled={isEditMode}
                   onChange={(event) => handleFile(event.target.files?.[0])}
                 />
 
                 <div className="flex w-full items-center justify-center gap-3 text-center">
-                  <p className="text-sm font-medium text-[#555555]">PDFをドラッグ＆ドロップ</p>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="rounded-md border border-[#E1E1E1] bg-white px-3 py-1.5 text-xs font-semibold text-[#444444] transition-colors duration-200 ease-[ease] hover:bg-[#FFF7E8]"
-                  >
-                    ファイル選択
-                  </button>
+                  <p className="text-sm font-medium text-[#555555]">
+                    {isEditMode
+                      ? editOrderFileName
+                        ? `既存PDFを維持: ${editOrderFileName}`
+                        : "PDFは登録されていません"
+                      : "PDFをドラッグ＆ドロップ"}
+                  </p>
+                  {!isEditMode ? (
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="rounded-md border border-[#E1E1E1] bg-white px-3 py-1.5 text-xs font-semibold text-[#444444] transition-colors duration-200 ease-[ease] hover:bg-[#FFF7E8]"
+                    >
+                      ファイル選択
+                    </button>
+                  ) : null}
 
-                  {pdfPreviewUrl ? (
+                  {!isEditMode && pdfPreviewUrl ? (
                     <button
                       type="button"
                       onClick={() => window.open(pdfPreviewUrl, "_blank", "noopener,noreferrer")}
@@ -2016,7 +2364,14 @@ function OrderEntryModal() {
           />
           <button
             type="button"
-            onClick={() => console.log("[Order] cancel clicked")}
+            onClick={() => {
+              if (isEditMode) {
+                onCancel?.();
+              } else {
+                console.log("[Order] cancel clicked");
+              }
+            }}
+            disabled={isOrderSubmitting}
             className="rounded-lg border border-[#E1E1E1] bg-white px-5 py-2 text-sm font-semibold text-[#444444] transition-colors duration-200 ease-[ease] hover:bg-[#F8F8F8]"
           >
             キャンセル
@@ -2024,9 +2379,16 @@ function OrderEntryModal() {
 
           <button
             type="submit"
+            disabled={isOrderSubmitting || isEditLoading || isCustomerPriceLoading}
             className="rounded-lg bg-[#fff362] px-6 py-2 text-sm font-bold text-[#222222] transition-colors duration-200 ease-[ease] hover:bg-[#fff362]"
           >
-            受注登録
+            {isOrderSubmitting
+              ? isEditMode
+                ? "保存中..."
+                : "登録中..."
+              : isEditMode
+                ? "変更を保存"
+                : "受注登録"}
           </button>
         </div>
       </form>
@@ -2036,13 +2398,24 @@ function OrderEntryModal() {
 
 function WorkInputModal() {
   const [records, setRecords] = useState<WorkRecord[]>([]);
+  const [deletedRecords, setDeletedRecords] = useState<DeletedWorkRecord[]>([]);
   const [selectedDate, setSelectedDate] = useState(getTodayJstString);
+  const [workReloadKey, setWorkReloadKey] = useState(0);
+  const [deletedReloadKey, setDeletedReloadKey] = useState(0);
+  const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<WorkRecord | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<DeletedWorkRecord | null>(null);
+  const [isDeletedListOpen, setIsDeletedListOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [expandedClinics, setExpandedClinics] = useState<Set<string>>(new Set());
   const [depositMaterialType, setDepositMaterialType] = useState<"para" | "miro" | null>(null);
   const [depositMaterialAmount, setDepositMaterialAmount] = useState("");
   const [workInputError, setWorkInputError] = useState("");
   const [isWorkStatusUpdating, setIsWorkStatusUpdating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [isDeletedListLoading, setIsDeletedListLoading] = useState(false);
+  const [deletedListError, setDeletedListError] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -2082,7 +2455,56 @@ function WorkInputModal() {
     void loadWorkRecords();
 
     return () => controller.abort();
-  }, [selectedDate]);
+  }, [selectedDate, workReloadKey]);
+
+  useEffect(() => {
+    if (!isDeletedListOpen) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const loadDeletedRecords = async () => {
+      try {
+        setIsDeletedListLoading(true);
+        setDeletedListError("");
+        const response = await fetch("/works/deleted", {
+          signal: controller.signal,
+        });
+        const data: unknown = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          throw new Error(
+            typeof data === "object" &&
+              data !== null &&
+              "error" in data &&
+              typeof data.error === "string"
+              ? data.error
+              : "削除済み案件の取得に失敗しました"
+          );
+        }
+
+        setDeletedRecords(data as DeletedWorkRecord[]);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        console.error(error);
+        setDeletedListError(
+          error instanceof Error ? error.message : "削除済み案件の取得に失敗しました"
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsDeletedListLoading(false);
+        }
+      }
+    };
+
+    void loadDeletedRecords();
+
+    return () => controller.abort();
+  }, [isDeletedListOpen, deletedReloadKey]);
 
   const selectedRecord = records.find((record) => record.id === selectedId) ?? records[0];
 
@@ -2114,6 +2536,84 @@ function WorkInputModal() {
     setDepositMaterialType(null);
     setDepositMaterialAmount("");
     setWorkInputError("");
+  };
+
+  const deleteOrder = async () => {
+    if (!deleteTarget || isDeleting) {
+      return;
+    }
+
+    setIsDeleting(true);
+    setWorkInputError("");
+
+    try {
+      const response = await fetch(`/orders/${deleteTarget.id}`, {
+        method: "DELETE",
+      });
+      const data: unknown = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          typeof data === "object" &&
+            data !== null &&
+            "error" in data &&
+            typeof data.error === "string"
+            ? data.error
+            : "案件の削除に失敗しました"
+        );
+      }
+
+      setDeleteTarget(null);
+      setWorkReloadKey((current) => current + 1);
+      setDeletedReloadKey((current) => current + 1);
+    } catch (error) {
+      console.error(error);
+      setWorkInputError(
+        error instanceof Error ? error.message : "案件の削除に失敗しました"
+      );
+      setDeleteTarget(null);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const restoreOrder = async () => {
+    if (!restoreTarget || isRestoring) {
+      return;
+    }
+
+    setIsRestoring(true);
+    setDeletedListError("");
+
+    try {
+      const response = await fetch(`/orders/${restoreTarget.id}/restore`, {
+        method: "POST",
+      });
+      const data: unknown = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          typeof data === "object" &&
+            data !== null &&
+            "error" in data &&
+            typeof data.error === "string"
+            ? data.error
+            : "案件の復元に失敗しました"
+        );
+      }
+
+      setRestoreTarget(null);
+      setDeletedReloadKey((current) => current + 1);
+      setWorkReloadKey((current) => current + 1);
+    } catch (error) {
+      console.error(error);
+      setDeletedListError(
+        error instanceof Error ? error.message : "案件の復元に失敗しました"
+      );
+      setRestoreTarget(null);
+    } finally {
+      setIsRestoring(false);
+    }
   };
 
   const updateWorkStatus = async (
@@ -2220,6 +2720,159 @@ function WorkInputModal() {
       className="flex h-full min-h-[340px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white p-6"
       aria-label="作業時入力"
     >
+      {editingOrderId !== null ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20 p-4 backdrop-blur-[1px]">
+          <OrderEntryModal
+            editOrderId={editingOrderId}
+            onCancel={() => setEditingOrderId(null)}
+            onSaved={() => {
+              setEditingOrderId(null);
+              setWorkReloadKey((current) => current + 1);
+            }}
+          />
+        </div>
+      ) : null}
+
+      {isDeletedListOpen ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20 p-4 backdrop-blur-[1px]">
+          <section className="flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[18px] border border-[#E9E9E9] bg-white p-6 shadow-[0_18px_48px_rgba(0,0,0,0.14)]">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-bold text-[#222222]">削除済み案件</h3>
+                <p className="mt-1 text-xs text-[#666666]">最近削除した案件から表示しています</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDeletedListOpen(false)}
+                className="rounded-lg border border-[#E1E1E1] bg-white px-4 py-2 text-sm font-semibold text-[#444444] transition-colors hover:bg-[#F8F8F8]"
+              >
+                閉じる
+              </button>
+            </div>
+
+            {deletedListError ? (
+              <p className="mt-4 rounded-lg border border-[#F4C7C7] bg-[#FFF3F3] px-3 py-2 text-sm text-[#A63C3C]">
+                {deletedListError}
+              </p>
+            ) : null}
+
+            <div className="mt-4 min-h-0 flex-1 overflow-auto border-y border-[#ECECEC]">
+              {isDeletedListLoading ? (
+                <p className="py-8 text-center text-sm text-[#777777]">読み込み中...</p>
+              ) : deletedRecords.length === 0 ? (
+                <p className="py-8 text-center text-sm text-[#777777]">削除済み案件はありません</p>
+              ) : (
+                <div className="min-w-[760px] divide-y divide-[#EEEEEE]">
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_110px_130px_auto] items-center gap-3 bg-[#FAFAFA] px-3 py-2 text-xs font-semibold text-[#666666]">
+                    <span>医院</span>
+                    <span>患者名</span>
+                    <span>作業内容</span>
+                    <span>納品予定日</span>
+                    <span>削除日時</span>
+                    <span>操作</span>
+                  </div>
+                  {deletedRecords.map((record) => (
+                    <div
+                      key={record.id}
+                      className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_110px_130px_auto] items-center gap-3 px-3 py-3 text-sm"
+                    >
+                      <span className="truncate text-[#333333]" title={record.clinic}>
+                        {record.clinic}
+                      </span>
+                      <span className="truncate text-[#333333]" title={record.patient}>
+                        {record.patient}
+                      </span>
+                      <span className="truncate text-[#333333]" title={record.workType}>
+                        {record.workType}
+                      </span>
+                      <span className="text-xs text-[#555555]">{record.deliveryDate}</span>
+                      <span className="text-xs text-[#666666]">
+                        {formatJstDateTime(record.deletedAt)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setRestoreTarget(record)}
+                        className="rounded-lg border border-[#E1E1E1] bg-white px-3 py-1.5 text-xs font-semibold text-[#444444] transition-colors hover:bg-[#F8F8F8]"
+                      >
+                        復元
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {deleteTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4 backdrop-blur-[1px]">
+          <div className="w-full max-w-md rounded-[18px] border border-[#E9E9E9] bg-white px-6 py-6 shadow-[0_18px_48px_rgba(0,0,0,0.14)]">
+            <h3 className="text-lg font-bold text-[#1F1F1F]">案件を削除しますか？</h3>
+            <div className="mt-4 space-y-2 rounded-lg border border-[#E9E9E9] bg-[#FCFCFC] px-4 py-3 text-sm text-[#444444]">
+              <p><span className="font-semibold">医院：</span>{deleteTarget.clinic}</p>
+              <p><span className="font-semibold">患者：</span>{deleteTarget.patient}</p>
+              <p><span className="font-semibold">作業：</span>{deleteTarget.workType}</p>
+            </div>
+            <p className="mt-4 text-sm text-[#666666]">
+              削除した案件は「削除済み案件」から復元できます。
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                disabled={isDeleting}
+                className="rounded-lg border border-[#E1E1E1] bg-white px-4 py-2 text-sm font-semibold text-[#444444] transition-colors hover:bg-[#F8F8F8] disabled:opacity-60"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={() => void deleteOrder()}
+                disabled={isDeleting}
+                className="rounded-lg bg-[#C9473B] px-5 py-2 text-sm font-bold text-white transition-colors hover:bg-[#B43D33] disabled:opacity-60"
+              >
+                {isDeleting ? "削除中..." : "削除する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {restoreTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4 backdrop-blur-[1px]">
+          <div className="w-full max-w-md rounded-[18px] border border-[#E9E9E9] bg-white px-6 py-6 shadow-[0_18px_48px_rgba(0,0,0,0.14)]">
+            <h3 className="text-lg font-bold text-[#1F1F1F]">この案件を復元しますか？</h3>
+            <div className="mt-4 space-y-2 rounded-lg border border-[#E9E9E9] bg-[#FCFCFC] px-4 py-3 text-sm text-[#444444]">
+              <p><span className="font-semibold">医院：</span>{restoreTarget.clinic}</p>
+              <p><span className="font-semibold">患者：</span>{restoreTarget.patient}</p>
+              <p><span className="font-semibold">作業：</span>{restoreTarget.workType}</p>
+            </div>
+            <p className="mt-4 text-sm text-[#666666]">
+              復元すると、納品予定日の「作業一覧」に再表示されます。
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRestoreTarget(null)}
+                disabled={isRestoring}
+                className="rounded-lg border border-[#E1E1E1] bg-white px-4 py-2 text-sm font-semibold text-[#444444] transition-colors hover:bg-[#F8F8F8] disabled:opacity-60"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={() => void restoreOrder()}
+                disabled={isRestoring}
+                className="rounded-lg bg-[#fff362] px-5 py-2 text-sm font-bold text-[#222222] transition-colors hover:bg-[#F7E94E] disabled:opacity-60"
+              >
+                {isRestoring ? "復元中..." : "復元する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="h-[14px] w-full rounded-t-[20px] bg-[#fff362]" aria-hidden="true" />
 
       <div className="mt-3 flex items-start gap-3">
@@ -2361,6 +3014,13 @@ function WorkInputModal() {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
+                  onClick={() => setIsDeletedListOpen(true)}
+                  className="h-8 rounded-lg border border-[#E1E1E1] bg-white px-3 text-xs font-semibold text-[#444444] transition-colors hover:bg-[#F8F8F8]"
+                >
+                  削除済み案件
+                </button>
+                <button
+                  type="button"
                   onClick={() => setSelectedDate((current) => shiftDateString(current, -1))}
                   className="h-8 rounded-lg border border-[#E1E1E1] bg-white px-3 text-xs font-semibold text-[#444444] transition-colors hover:bg-[#F8F8F8]"
                 >
@@ -2424,42 +3084,64 @@ function WorkInputModal() {
                       {clinicRecords.map((record) => {
                         const isSelected = record.id === selectedId;
                         return (
-                          <button
+                          <div
                             key={record.id}
-                            type="button"
-                            onClick={() => handleSelectWorkRecord(record.id)}
-                            className={`grid w-full grid-cols-[1fr_1fr_1fr_auto] items-center gap-3 border-b border-[#EFEFEF] px-3 py-2 text-left last:border-b-0 transition-colors duration-150 ease-[ease] ${
+                            className={`flex w-full items-center border-b border-[#EFEFEF] last:border-b-0 transition-colors duration-150 ease-[ease] ${
                               isSelected ? "bg-[#FFF8EA]" : "bg-transparent hover:bg-[#FFFDF7]"
                             } ${record.completed ? "text-[#9AA0AA]" : "text-[#2A2A2A]"}`}
                           >
-                            <span className="flex min-w-0 items-center gap-1.5">
-                              {record.completed ? (
-                                <svg
-                                  viewBox="0 0 24 24"
-                                  className="h-4 w-4 shrink-0 text-[#7E8591]"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  aria-hidden="true"
-                                >
-                                  <circle cx="12" cy="12" r="9" />
-                                  <path d="m8.5 12 2.3 2.3 4.7-4.8" />
-                                </svg>
-                              ) : null}
-                              <span className="truncate">{record.patient}</span>
-                            </span>
-                            <span className="truncate">{record.workType}</span>
-                            <span className="truncate">{record.deliveryDate}</span>
-                            {record.completed ? (
-                              <span className="inline-flex items-center text-xs font-semibold text-[#7E8591]">
-                                完了
+                            <button
+                              type="button"
+                              onClick={() => handleSelectWorkRecord(record.id)}
+                              className="grid min-w-0 flex-1 grid-cols-[1fr_1fr_1fr_auto] items-center gap-3 px-3 py-2 text-left"
+                            >
+                              <span className="flex min-w-0 items-center gap-1.5">
+                                {record.completed ? (
+                                  <svg
+                                    viewBox="0 0 24 24"
+                                    className="h-4 w-4 shrink-0 text-[#7E8591]"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    aria-hidden="true"
+                                  >
+                                    <circle cx="12" cy="12" r="9" />
+                                    <path d="m8.5 12 2.3 2.3 4.7-4.8" />
+                                  </svg>
+                                ) : null}
+                                <span className="truncate">{record.patient}</span>
                               </span>
-                            ) : (
-                              <span className="text-xs text-[#666666]">作業中</span>
-                            )}
-                          </button>
+                              <span className="truncate">{record.workType}</span>
+                              <span className="truncate">{record.deliveryDate}</span>
+                              {record.completed ? (
+                                <span className="inline-flex items-center text-xs font-semibold text-[#7E8591]">
+                                  完了
+                                </span>
+                              ) : (
+                                <span className="text-xs text-[#666666]">作業中</span>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingOrderId(record.id)}
+                              disabled={!record.editable}
+                              title={record.editBlockedReason ?? "案件を編集"}
+                              className="mr-3 shrink-0 rounded-lg border border-[#E1E1E1] bg-white px-3 py-1.5 text-xs font-semibold text-[#444444] transition-colors hover:bg-[#F8F8F8] disabled:cursor-not-allowed disabled:bg-[#F3F3F3] disabled:text-[#AAAAAA]"
+                            >
+                              編集
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeleteTarget(record)}
+                              disabled={!record.deletable}
+                              title={record.deleteBlockedReason ?? "案件を削除"}
+                              className="mr-3 shrink-0 rounded-lg border border-[#E7C9C6] bg-white px-3 py-1.5 text-xs font-semibold text-[#A63C3C] transition-colors hover:bg-[#FFF3F3] disabled:cursor-not-allowed disabled:border-[#E1E1E1] disabled:bg-[#F3F3F3] disabled:text-[#AAAAAA]"
+                            >
+                              削除
+                            </button>
+                          </div>
                         );
                       })}
                     </div>
