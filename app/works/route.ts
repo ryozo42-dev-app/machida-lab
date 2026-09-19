@@ -14,6 +14,29 @@ function formatDate(date: Date, separator = "-") {
   return `${values.year}${separator}${values.month}${separator}${values.day}`;
 }
 
+function parseDateOnly(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
 function formatToothNumber(toothNumber: string) {
   if (!/^[1-8][1-8]$/.test(toothNumber)) {
     return toothNumber;
@@ -29,16 +52,28 @@ function formatToothNumber(toothNumber: string) {
   return `${jaw} ${side} ${isDeciduous ? deciduousTooth ?? position : position}`;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const authResponse = await requireAuthResponse();
   if (authResponse) return authResponse;
 
   try {
+    const dateParam = new URL(request.url).searchParams.get("date");
+    const deliveryDate = dateParam === null ? null : parseDateOnly(dateParam);
+
+    if (dateParam !== null && deliveryDate === null) {
+      return NextResponse.json(
+        { error: "date must be a valid YYYY-MM-DD value" },
+        { status: 400 }
+      );
+    }
+
     const orders = await prisma.orders.findMany({
       where: {
         work_status: {
           in: ["pending", "in_progress"],
         },
+        deleted_at: null,
+        ...(deliveryDate ? { delivery_date: deliveryDate } : {}),
       },
       orderBy: [{ delivery_date: "asc" }, { id: "asc" }],
     });

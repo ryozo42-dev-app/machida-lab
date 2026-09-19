@@ -169,7 +169,13 @@ model orders {
   billed                                 Boolean?                                 @default(false)
   created_at                             DateTime?                                @default(now()) @db.Timestamp(6)
   work_status                            String                                   @default("pending") @db.VarChar(20)
+  deleted_at                             DateTime?                                @db.Timestamp(6)
+  deleted_by                             Int?
   customer_deposit_material_transactions customer_deposit_material_transactions[]
+  deleted_by_user                        users?                                   @relation("OrderDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([deleted_at])
+  @@index([deleted_by])
 }
 
 model patients {
@@ -225,6 +231,7 @@ model users {
   created_at           DateTime?              @default(now()) @db.Timestamp(6)
   user_sessions        user_sessions[]
   email_otp_challenges email_otp_challenges[]
+  deleted_orders       orders[]               @relation("OrderDeletedBy")
 }
 
 model user_sessions {

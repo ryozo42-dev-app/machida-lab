@@ -259,6 +259,17 @@ function getTodayJstString() {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+function shiftDateString(value: string, days: number) {
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days));
+
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
 function formatDashboardFetchedAt(value: string | null) {
   if (!value) {
     return "-";
@@ -2025,6 +2036,7 @@ function OrderEntryModal() {
 
 function WorkInputModal() {
   const [records, setRecords] = useState<WorkRecord[]>([]);
+  const [selectedDate, setSelectedDate] = useState(getTodayJstString);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [expandedClinics, setExpandedClinics] = useState<Set<string>>(new Set());
   const [depositMaterialType, setDepositMaterialType] = useState<"para" | "miro" | null>(null);
@@ -2037,7 +2049,9 @@ function WorkInputModal() {
 
     const loadWorkRecords = async () => {
       try {
-        const response = await fetch("/works", { signal: controller.signal });
+        const response = await fetch(`/works?date=${selectedDate}`, {
+          signal: controller.signal,
+        });
 
         if (!response.ok) {
           throw new Error("Failed to fetch work records");
@@ -2068,7 +2082,7 @@ function WorkInputModal() {
     void loadWorkRecords();
 
     return () => controller.abort();
-  }, []);
+  }, [selectedDate]);
 
   const selectedRecord = records.find((record) => record.id === selectedId) ?? records[0];
 
@@ -2212,7 +2226,7 @@ function WorkInputModal() {
         <span className="mt-1 h-10 w-[5px] rounded-full bg-[#fff362]" aria-hidden="true" />
         <div>
           <h2 className="text-2xl font-bold text-[#222222]">作業時入力</h2>
-          <p className="mt-1 text-xs text-[#666666]">本日の作業を管理します</p>
+          <p className="mt-1 text-xs text-[#666666]">選択日の作業を管理します</p>
         </div>
       </div>
 
@@ -2342,9 +2356,50 @@ function WorkInputModal() {
 
         <div className="flex min-h-0 flex-[2] overflow-hidden rounded-[16px] border border-[#E8E8E8] bg-white p-4">
           <div className="flex min-h-0 w-full flex-col">
-            <p className="text-sm font-semibold text-[#333333]">本日の作業一覧</p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-[#333333]">作業一覧</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate((current) => shiftDateString(current, -1))}
+                  className="h-8 rounded-lg border border-[#E1E1E1] bg-white px-3 text-xs font-semibold text-[#444444] transition-colors hover:bg-[#F8F8F8]"
+                >
+                  前日
+                </button>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(event) => {
+                    if (event.target.value) {
+                      setSelectedDate(event.target.value);
+                    }
+                  }}
+                  className="h-8 rounded-lg border border-[#E1E1E1] bg-white px-2 text-xs font-semibold text-[#333333] outline-none focus:border-[#F0B132]"
+                  aria-label="作業一覧の日付"
+                />
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate((current) => shiftDateString(current, 1))}
+                  className="h-8 rounded-lg border border-[#E1E1E1] bg-white px-3 text-xs font-semibold text-[#444444] transition-colors hover:bg-[#F8F8F8]"
+                >
+                  翌日
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate(getTodayJstString())}
+                  className="h-8 rounded-lg bg-[#fff362] px-3 text-xs font-bold text-[#222222] transition-colors hover:bg-[#F7E94E]"
+                >
+                  今日
+                </button>
+              </div>
+            </div>
 
             <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 text-sm">
+              {clinicEntries.length === 0 ? (
+                <p className="py-6 text-center text-sm text-[#777777]">
+                  この日の作業はありません
+                </p>
+              ) : null}
               {clinicEntries.map(([clinicName, clinicRecords]) => {
                 const isExpanded = expandedClinics.has(clinicName);
 
